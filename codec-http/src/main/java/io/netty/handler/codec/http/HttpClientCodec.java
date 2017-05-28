@@ -18,10 +18,13 @@ package io.netty.handler.codec.http;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.CombinedChannelHandler;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.CombinedChannelDuplexHandler;
 import io.netty.handler.codec.PrematureChannelClosureException;
+import io.netty.util.ReferenceCountUtil;
 
 import java.util.ArrayDeque;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -38,17 +41,16 @@ import java.util.concurrent.atomic.AtomicLong;
  * a {@link PrematureChannelClosureException} is thrown.
  *
  * @see HttpServerCodec
- *
- * @apiviz.has io.netty.handler.codec.http.HttpResponseDecoder
- * @apiviz.has io.netty.handler.codec.http.HttpRequestEncoder
  */
-public class HttpClientCodec extends CombinedChannelHandler {
+public final class HttpClientCodec extends CombinedChannelDuplexHandler<HttpResponseDecoder, HttpRequestEncoder>
+        implements HttpClientUpgradeHandler.SourceCodec {
 
     /** A queue that is used for correlating a request and a response. */
-    final Queue<HttpMethod> queue = new ArrayDeque<HttpMethod>();
+    private final Queue<HttpMethod> queue = new ArrayDeque<HttpMethod>();
+    private final boolean parseHttpAfterConnectRequest;
 
     /** If true, decoding stops (i.e. pass-through) */
-    volatile boolean done;
+    private boolean done;
 
     private final AtomicLong requestResponseCounter = new AtomicLong();
     private final boolean failOnMissingResponse;
@@ -65,32 +67,106 @@ public class HttpClientCodec extends CombinedChannelHandler {
     /**
      * Creates a new instance with the specified decoder options.
      */
-    public HttpClientCodec(
-            int maxInitialLineLength, int maxHeaderSize, int maxChunkSize) {
+    public HttpClientCodec(int maxInitialLineLength, int maxHeaderSize, int maxChunkSize) {
         this(maxInitialLineLength, maxHeaderSize, maxChunkSize, false);
     }
 
+    /**
+     * Creates a new instance with the specified decoder options.
+     */
     public HttpClientCodec(
-            int maxInitialLineLength, int maxHeaderSize, int maxChunkSize,
-            boolean failOnMissingResponse) {
+            int maxInitialLineLength, int maxHeaderSize, int maxChunkSize, boolean failOnMissingResponse) {
+        this(maxInitialLineLength, maxHeaderSize, maxChunkSize, failOnMissingResponse, true);
+    }
 
-        init(
-                new Decoder(maxInitialLineLength, maxHeaderSize, maxChunkSize),
-                new Encoder());
+    /**
+     * Creates a new instance with the specified decoder options.
+     */
+    public HttpClientCodec(
+            int maxInitialLineLength, int maxHeaderSize, int maxChunkSize, boolean failOnMissingResponse,
+            boolean validateHeaders) {
+        this(maxInitialLineLength, maxHeaderSize, maxChunkSize, failOnMissingResponse, validateHeaders, false);
+    }
+
+    /**
+     * Creates a new instance with the specified decoder options.
+     */
+    public HttpClientCodec(
+            int maxInitialLineLength, int maxHeaderSize, int maxChunkSize, boolean failOnMissingResponse,
+            boolean validateHeaders, boolean parseHttpAfterConnectRequest) {
+        init(new Decoder(maxInitialLineLength, maxHeaderSize, maxChunkSize, validateHeaders), new Encoder());
+        this.failOnMissingResponse = failOnMissingResponse;
+        this.parseHttpAfterConnectRequest = parseHttpAfterConnectRequest;
+    }
+
+    /**
+     * Creates a new instance with the specified decoder options.
+     */
+    public HttpClientCodec(
+            int maxInitialLineLength, int maxHeaderSize, int maxChunkSize, boolean failOnMissingResponse,
+            boolean validateHeaders, int initialBufferSize) {
+        this(maxInitialLineLength, maxHeaderSize, maxChunkSize, failOnMissingResponse, validateHeaders,
+                initialBufferSize, false);
+    }
+
+    /**
+     * Creates a new instance with the specified decoder options.
+     */
+    public HttpClientCodec(
+            int maxInitialLineLength, int maxHeaderSize, int maxChunkSize, boolean failOnMissingResponse,
+            boolean validateHeaders, int initialBufferSize, boolean parseHttpAfterConnectRequest) {
+        init(new Decoder(maxInitialLineLength, maxHeaderSize, maxChunkSize, validateHeaders, initialBufferSize),
+             new Encoder());
+        this.parseHttpAfterConnectRequest = parseHttpAfterConnectRequest;
         this.failOnMissingResponse = failOnMissingResponse;
     }
 
+    /**
+     * Prepares to upgrade to another protocol from HTTP. Disables the {@link Encoder}.
+     */
+    @Override
+    public void prepareUpgradeFrom(ChannelHandlerContext ctx) {
+        ((Encoder) outboundHandler()).upgraded = true;
+    }
+
+    /**
+     * Upgrades to another protocol from HTTP. Removes the {@link Decoder} and {@link Encoder} from
+     * the pipeline.
+     */
+    @Override
+    public void upgradeFrom(ChannelHandlerContext ctx) {
+        final ChannelPipeline p = ctx.pipeline();
+        p.remove(this);
+    }
+
+    public void setSingleDecode(boolean singleDecode) {
+        inboundHandler().setSingleDecode(singleDecode);
+    }
+
+    public boolean isSingleDecode() {
+        return inboundHandler().isSingleDecode();
+    }
+
     private final class Encoder extends HttpRequestEncoder {
+
+        boolean upgraded;
+
         @Override
         protected void encode(
-                ChannelHandlerContext ctx, Object msg, ByteBuf out) throws Exception {
+                ChannelHandlerContext ctx, Object msg, List<Object> out) throws Exception {
+
+            if (upgraded) {
+                out.add(ReferenceCountUtil.retain(msg));
+                return;
+            }
+
             if (msg instanceof HttpRequest && !done) {
-                queue.offer(((HttpRequest) msg).getMethod());
+                queue.offer(((HttpRequest) msg).method());
             }
 
             super.encode(ctx, msg, out);
 
-            if (failOnMissingResponse) {
+            if (failOnMissingResponse && !done) {
                 // check if the request is chunked if so do not increment
                 if (msg instanceof LastHttpContent) {
                     // increment as its the last chunk
@@ -101,22 +177,35 @@ public class HttpClientCodec extends CombinedChannelHandler {
     }
 
     private final class Decoder extends HttpResponseDecoder {
+        Decoder(int maxInitialLineLength, int maxHeaderSize, int maxChunkSize, boolean validateHeaders) {
+            super(maxInitialLineLength, maxHeaderSize, maxChunkSize, validateHeaders);
+        }
 
-        Decoder(int maxInitialLineLength, int maxHeaderSize, int maxChunkSize) {
-            super(maxInitialLineLength, maxHeaderSize, maxChunkSize);
+        Decoder(int maxInitialLineLength, int maxHeaderSize, int maxChunkSize, boolean validateHeaders,
+                int initialBufferSize) {
+            super(maxInitialLineLength, maxHeaderSize, maxChunkSize, validateHeaders, initialBufferSize);
         }
 
         @Override
-        protected Object decode(
-                ChannelHandlerContext ctx, ByteBuf buffer) throws Exception {
+        protected void decode(
+                ChannelHandlerContext ctx, ByteBuf buffer, List<Object> out) throws Exception {
             if (done) {
-                return buffer.readBytes(actualReadableBytes());
-            } else {
-                Object msg = super.decode(ctx, buffer);
-                if (failOnMissingResponse) {
-                    decrement(msg);
+                int readable = actualReadableBytes();
+                if (readable == 0) {
+                    // if non is readable just return null
+                    // https://github.com/netty/netty/issues/1159
+                    return;
                 }
-                return msg;
+                out.add(buffer.readBytes(readable));
+            } else {
+                int oldSize = out.size();
+                super.decode(ctx, buffer, out);
+                if (failOnMissingResponse) {
+                    int size = out.size();
+                    for (int i = oldSize; i < size; i++) {
+                        decrement(out.get(i));
+                    }
+                }
             }
         }
 
@@ -128,17 +217,12 @@ public class HttpClientCodec extends CombinedChannelHandler {
             // check if it's an Header and its transfer encoding is not chunked.
             if (msg instanceof LastHttpContent) {
                 requestResponseCounter.decrementAndGet();
-            } else if (msg instanceof Object[]) {
-                Object[] objects = (Object[]) msg;
-                for (Object obj: objects) {
-                    decrement(obj);
-                }
             }
         }
 
         @Override
         protected boolean isContentAlwaysEmpty(HttpMessage msg) {
-            final int statusCode = ((HttpResponse) msg).getStatus().code();
+            final int statusCode = ((HttpResponse) msg).status().code();
             if (statusCode == 100) {
                 // 100-continue response should be excluded from paired comparison.
                 return true;
@@ -176,9 +260,12 @@ public class HttpClientCodec extends CombinedChannelHandler {
                 // Successful CONNECT request results in a response with empty body.
                 if (statusCode == 200) {
                     if (HttpMethod.CONNECT.equals(method)) {
-                        // Proxy connection established - Not HTTP anymore.
-                        done = true;
-                        queue.clear();
+                        // Proxy connection established - Parse HTTP only if configured by parseHttpAfterConnectRequest,
+                        // else pass through.
+                        if (!parseHttpAfterConnectRequest) {
+                            done = true;
+                            queue.clear();
+                        }
                         return true;
                     }
                 }

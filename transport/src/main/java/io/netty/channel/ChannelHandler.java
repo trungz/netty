@@ -15,8 +15,6 @@
  */
 package io.netty.channel;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.MessageBuf;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
 
@@ -28,31 +26,28 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Handles or intercepts a {@link ChannelInboundInvoker} or {@link ChannelOutboundInvoker} operation, and forwards it
- * to the next handler in a {@link ChannelPipeline}.
+ * Handles an I/O event or intercepts an I/O operation, and forwards it to its next handler in
+ * its {@link ChannelPipeline}.
  *
  * <h3>Sub-types</h3>
  * <p>
- * {@link ChannelHandler} itself does not provide many methods.  To handle a
- * a {@link ChannelInboundInvoker} or {@link ChannelOutboundInvoker} operation
- * you need to implement its sub-interfaces.  There are many different sub-interfaces
- * which handles inbound and outbound operations.
- *
- * But the most useful for developers may be:
+ * {@link ChannelHandler} itself does not provide many methods, but you usually have to implement one of its subtypes:
  * <ul>
- * <li>{@link ChannelInboundByteHandlerAdapter} handles and intercepts inbound operations where the inbound message
- * type is a {@link ByteBuf}.</li>
- * <li>{@link ChannelInboundMessageHandlerAdapter} handles and intercepts inbound operations where the inbound message
- * type is a {@link MessageBuf}.</li>
- *  * <li>{@link ChannelOutboundByteHandlerAdapter} handles and intercepts outbound operations where the inbound message
- * type is a {@link ByteBuf}.</li>
- * <li>{@link ChannelOutboundMessageHandlerAdapter} handles and intercepts outbound operations where the inbound message
- * type is a {@link MessageBuf}.</li>
+ * <li>{@link ChannelInboundHandler} to handle inbound I/O events, and</li>
+ * <li>{@link ChannelOutboundHandler} to handle outbound I/O operations.</li>
  * </ul>
- *
- * You will also find more detailed explanation from the documentation of
- * each sub-interface on how an event is interpreted when it goes upstream and
- * downstream respectively.
+ * </p>
+ * <p>
+ * Alternatively, the following adapter classes are provided for your convenience:
+ * <ul>
+ * <li>{@link ChannelInboundHandlerAdapter} to handle inbound I/O events,</li>
+ * <li>{@link ChannelOutboundHandlerAdapter} to handle outbound I/O operations, and</li>
+ * <li>{@link ChannelDuplexHandler} to handle both inbound and outbound events</li>
+ * </ul>
+ * </p>
+ * <p>
+ * For more information, please refer to the documentation of each subtype.
+ * </p>
  *
  * <h3>The context object</h3>
  * <p>
@@ -61,7 +56,7 @@ import java.lang.annotation.Target;
  * {@link ChannelPipeline} it belongs to via a context object.  Using the
  * context object, the {@link ChannelHandler} can pass events upstream or
  * downstream, modify the pipeline dynamically, or store the information
- * (attachment) which is specific to the handler.
+ * (using {@link AttributeKey}s) which is specific to the handler.
  *
  * <h3>State management</h3>
  *
@@ -72,12 +67,12 @@ import java.lang.annotation.Target;
  *     // your methods here
  * }
  *
- * public class DataServerHandler extends {@link ChannelInboundMessageHandlerAdapter}&ltMessage&gt {
+ * public class DataServerHandler extends {@link SimpleChannelInboundHandler}&lt;Message&gt; {
  *
  *     <b>private boolean loggedIn;</b>
  *
  *     {@code @Override}
- *     public void messageReceived({@link ChannelHandlerContext} ctx, Message message) {
+ *     public void channelRead0({@link ChannelHandlerContext} ctx, Message message) {
  *         {@link Channel} ch = e.getChannel();
  *         if (message instanceof LoginMessage) {
  *             authenticate((LoginMessage) message);
@@ -100,7 +95,7 @@ import java.lang.annotation.Target;
  * <pre>
  * // Create a new handler instance per channel.
  * // See {@link ChannelInitializer#initChannel(Channel)}.
- * public class DataServerInitializer extends {@link ChannelInitializer}&lt{@link Channel}&gt {
+ * public class DataServerInitializer extends {@link ChannelInitializer}&lt;{@link Channel}&gt; {
  *     {@code @Override}
  *     public void initChannel({@link Channel} channel) {
  *         channel.pipeline().addLast("handler", <b>new DataServerHandler()</b>);
@@ -109,11 +104,11 @@ import java.lang.annotation.Target;
  *
  * </pre>
  *
- * <h4>Using an attachment</h4>
+ * <h4>Using {@link AttributeKey}s</h4>
  *
  * Although it's recommended to use member variables to store the state of a
  * handler, for some reason you might not want to create many handler instances.
- * In such a case, you can use an <em>attachment</em> which is provided by
+ * In such a case, you can use {@link AttributeKey}s which is provided by
  * {@link ChannelHandlerContext}:
  * <pre>
  * public interface Message {
@@ -121,18 +116,13 @@ import java.lang.annotation.Target;
  * }
  *
  * {@code @Sharable}
- * public class DataServerHandler extends {@link ChannelInboundMessageHandlerAdapter}&ltMessage&gt {
- *   private final {@link AttributeKey}&lt{@link Boolean}&gt auth =
- *           new {@link AttributeKey}&lt{@link Boolean}&gt("auth");
- *
- *   // This handler will receive a sequence of increasing integers starting
- *   // from 1.
- *   {@code @Override}
- *   public void messageReceived({@link ChannelHandlerContext} ctx, {@link Integer} integer) {
- *     {@link Attribute}&lt{@link Boolean}&gt attr = ctx.getAttr(auth);
+ * public class DataServerHandler extends {@link SimpleChannelInboundHandler}&lt;Message&gt; {
+ *     private final {@link AttributeKey}&lt;{@link Boolean}&gt; auth =
+ *           {@link AttributeKey#valueOf(String) AttributeKey.valueOf("auth")};
  *
  *     {@code @Override}
- *     public void messageReceived({@link ChannelHandlerContext} ctx, Message message) {
+ *     public void channelRead({@link ChannelHandlerContext} ctx, Message message) {
+ *         {@link Attribute}&lt;{@link Boolean}&gt; attr = ctx.attr(auth);
  *         {@link Channel} ch = ctx.channel();
  *         if (message instanceof LoginMessage) {
  *             authenticate((LoginMessage) o);
@@ -148,10 +138,10 @@ import java.lang.annotation.Target;
  *     ...
  * }
  * </pre>
- * Now that the state of the handler is stored as an attachment, you can add the
+ * Now that the state of the handler is attached to the {@link ChannelHandlerContext}, you can add the
  * same handler instance to different pipelines:
  * <pre>
- * public class DataServerInitializer extends {@link ChannelInitializer}&lt{@link Channel}&gt {
+ * public class DataServerInitializer extends {@link ChannelInitializer}&lt;{@link Channel}&gt; {
  *
  *     private static final DataServerHandler <b>SHARED</b> = new DataServerHandler();
  *
@@ -165,7 +155,7 @@ import java.lang.annotation.Target;
  *
  * <h4>The {@code @Sharable} annotation</h4>
  * <p>
- * In the examples above which used an attachment,
+ * In the example above which used an {@link AttributeKey},
  * you might have noticed the {@code @Sharable} annotation.
  * <p>
  * If a {@link ChannelHandler} is annotated with the {@code @Sharable}
@@ -186,40 +176,27 @@ import java.lang.annotation.Target;
  * {@link ChannelPipeline} to find out more about inbound and outbound operations,
  * what fundamental differences they have, how they flow in a  pipeline,  and how to handle
  * the operation in your application.
- * @apiviz.landmark
- * @apiviz.exclude ^io\.netty\.handler\..*$
  */
 public interface ChannelHandler {
 
     /**
-     * Gets called before the {@link ChannelHandler} is added to the actual context.
+     * Gets called after the {@link ChannelHandler} was added to the actual context and it's ready to handle events.
      */
-    void beforeAdd(ChannelHandlerContext ctx) throws Exception;
+    void handlerAdded(ChannelHandlerContext ctx) throws Exception;
 
     /**
-     * Gets called after the {@link ChannelHandler} was added to the actual context.
+     * Gets called after the {@link ChannelHandler} was removed from the actual context and it doesn't handle events
+     * anymore.
      */
-    void afterAdd(ChannelHandlerContext ctx) throws Exception;
-
-    /**
-     * Gets called before the {@link ChannelHandler} is removed from the actual context.
-     */
-    void beforeRemove(ChannelHandlerContext ctx) throws Exception;
-
-    /**
-     * Gets called after the {@link ChannelHandler} was removed from the actual context.
-     */
-    void afterRemove(ChannelHandlerContext ctx) throws Exception;
+    void handlerRemoved(ChannelHandlerContext ctx) throws Exception;
 
     /**
      * Gets called if a {@link Throwable} was thrown.
+     *
+     * @deprecated is part of {@link ChannelInboundHandler}
      */
+    @Deprecated
     void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception;
-
-    /**
-     * Gets called if an user event was triggered.
-     */
-    void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception;
 
     /**
      * Indicates that the same instance of the annotated {@link ChannelHandler}

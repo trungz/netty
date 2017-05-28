@@ -21,10 +21,9 @@ import org.jboss.marshalling.MarshallingConfiguration;
 
 public class SerialCompatibleMarshallingEncoderTest extends AbstractCompatibleMarshallingEncoderTest {
 
-
     @Override
     protected MarshallerFactory createMarshallerFactory() {
-        return Marshalling.getProvidedMarshallerFactory("serial");
+        return Marshalling.getProvidedMarshallerFactory(SERIAL_FACTORY);
     }
 
     @Override

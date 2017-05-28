@@ -15,22 +15,24 @@
  */
 package io.netty.channel;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
-import io.netty.buffer.MessageBuf;
-import io.netty.logging.InternalLogger;
-import io.netty.logging.InternalLoggerFactory;
 import io.netty.util.DefaultAttributeMap;
+import io.netty.util.ReferenceCountUtil;
 import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.ThrowableUtil;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
-import java.io.EOFException;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
+import java.net.NoRouteToHostException;
 import java.net.SocketAddress;
+import java.net.SocketException;
 import java.nio.channels.ClosedChannelException;
-import java.util.Random;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.nio.channels.NotYetConnectedException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * A skeletal {@link Channel} implementation.
@@ -39,104 +41,99 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(AbstractChannel.class);
 
-    static final ConcurrentMap<Integer, Channel> allChannels = new ConcurrentHashMap<Integer, Channel>();
-
-    private static final Random random = new Random();
-
-    /**
-     * Generates a negative unique integer ID.  This method generates only
-     * negative integers to avoid conflicts with user-specified IDs where only
-     * non-negative integers are allowed.
-     */
-    private static Integer allocateId(Channel channel) {
-        int idVal = random.nextInt();
-        if (idVal > 0) {
-            idVal = -idVal;
-        } else if (idVal == 0) {
-            idVal = -1;
-        }
-
-        Integer id;
-        for (;;) {
-            id = Integer.valueOf(idVal);
-            // Loop until a unique ID is acquired.
-            // It should be found in one loop practically.
-            if (allChannels.putIfAbsent(id, channel) == null) {
-                // Successfully acquired.
-                return id;
-            } else {
-                // Taken by other channel at almost the same moment.
-                idVal --;
-                if (idVal >= 0) {
-                    idVal = -1;
-                }
-            }
-        }
-    }
+    private static final ClosedChannelException FLUSH0_CLOSED_CHANNEL_EXCEPTION = ThrowableUtil.unknownStackTrace(
+            new ClosedChannelException(), AbstractUnsafe.class, "flush0()");
+    private static final ClosedChannelException ENSURE_OPEN_CLOSED_CHANNEL_EXCEPTION = ThrowableUtil.unknownStackTrace(
+            new ClosedChannelException(), AbstractUnsafe.class, "ensureOpen(...)");
+    private static final ClosedChannelException CLOSE_CLOSED_CHANNEL_EXCEPTION = ThrowableUtil.unknownStackTrace(
+            new ClosedChannelException(), AbstractUnsafe.class, "close(...)");
+    private static final ClosedChannelException WRITE_CLOSED_CHANNEL_EXCEPTION = ThrowableUtil.unknownStackTrace(
+            new ClosedChannelException(), AbstractUnsafe.class, "write(...)");
+    private static final NotYetConnectedException FLUSH0_NOT_YET_CONNECTED_EXCEPTION = ThrowableUtil.unknownStackTrace(
+            new NotYetConnectedException(), AbstractUnsafe.class, "flush0()");
 
     private final Channel parent;
-    private final Integer id;
+    private final ChannelId id;
     private final Unsafe unsafe;
     private final DefaultChannelPipeline pipeline;
-    private final ChannelFuture succeededFuture = new SucceededChannelFuture(this);
-    private final VoidChannelPromise voidPromise = new VoidChannelPromise(this);
+    private final VoidChannelPromise unsafeVoidPromise = new VoidChannelPromise(this, false);
     private final CloseFuture closeFuture = new CloseFuture(this);
-
-    protected final ChannelFlushPromiseNotifier flushFutureNotifier = new ChannelFlushPromiseNotifier();
 
     private volatile SocketAddress localAddress;
     private volatile SocketAddress remoteAddress;
     private volatile EventLoop eventLoop;
     private volatile boolean registered;
 
-    private ClosedChannelException closedChannelException;
-    private boolean inFlushNow;
-    private boolean flushNowPending;
-
     /** Cache for the string representation of this channel */
     private boolean strValActive;
     private String strVal;
 
-    private AbstractUnsafe.FlushTask flushTaskInProgress;
+    /**
+     * Creates a new instance.
+     *
+     * @param parent
+     *        the parent of this channel. {@code null} if there's no parent.
+     */
+    protected AbstractChannel(Channel parent) {
+        this.parent = parent;
+        id = newId();
+        unsafe = newUnsafe();
+        pipeline = newChannelPipeline();
+    }
 
     /**
      * Creates a new instance.
      *
-     * @param id
-     *        the unique non-negative integer ID of this channel.
-     *        Specify {@code null} to auto-generate a unique negative integer
-     *        ID.
      * @param parent
      *        the parent of this channel. {@code null} if there's no parent.
      */
-    protected AbstractChannel(Channel parent, Integer id) {
-        if (id == null) {
-            id = allocateId(this);
-        } else {
-            if (id.intValue() < 0) {
-                throw new IllegalArgumentException("id: " + id + " (expected: >= 0)");
-            }
-            if (allChannels.putIfAbsent(id, this) != null) {
-                throw new IllegalArgumentException("duplicate ID: " + id);
-            }
-        }
-
+    protected AbstractChannel(Channel parent, ChannelId id) {
         this.parent = parent;
         this.id = id;
         unsafe = newUnsafe();
-        pipeline = new DefaultChannelPipeline(this);
-
-        closeFuture().addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture future) {
-                allChannels.remove(id());
-            }
-        });
+        pipeline = newChannelPipeline();
     }
 
     @Override
-    public final Integer id() {
+    public final ChannelId id() {
         return id;
+    }
+
+    /**
+     * Returns a new {@link DefaultChannelId} instance. Subclasses may override this method to assign custom
+     * {@link ChannelId}s to {@link Channel}s that use the {@link AbstractChannel#AbstractChannel(Channel)} constructor.
+     */
+    protected ChannelId newId() {
+        return DefaultChannelId.newInstance();
+    }
+
+    /**
+     * Returns a new {@link DefaultChannelPipeline} instance.
+     */
+    protected DefaultChannelPipeline newChannelPipeline() {
+        return new DefaultChannelPipeline(this);
+    }
+
+    @Override
+    public boolean isWritable() {
+        ChannelOutboundBuffer buf = unsafe.outboundBuffer();
+        return buf != null && buf.isWritable();
+    }
+
+    @Override
+    public long bytesBeforeUnwritable() {
+        ChannelOutboundBuffer buf = unsafe.outboundBuffer();
+        // isWritable() is currently assuming if there is no outboundBuffer then the channel is not writable.
+        // We should be consistent with that here.
+        return buf != null ? buf.bytesBeforeUnwritable() : 0;
+    }
+
+    @Override
+    public long bytesBeforeWritable() {
+        ChannelOutboundBuffer buf = unsafe.outboundBuffer();
+        // isWritable() is currently assuming if there is no outboundBuffer then the channel is not writable.
+        // We should be consistent with that here.
+        return buf != null ? buf.bytesBeforeWritable() : Long.MAX_VALUE;
     }
 
     @Override
@@ -177,6 +174,10 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         return localAddress;
     }
 
+    /**
+     * @deprecated no use-case for this.
+     */
+    @Deprecated
     protected void invalidateLocalAddress() {
         localAddress = null;
     }
@@ -196,8 +197,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
     }
 
     /**
-     * Reset the stored remoteAddress
+     * @deprecated no use-case for this.
      */
+    @Deprecated
     protected void invalidateRemoteAddress() {
         remoteAddress = null;
     }
@@ -238,13 +240,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
     }
 
     @Override
-    public ChannelFuture flush() {
-        return pipeline.flush();
-    }
-
-    @Override
-    public ChannelFuture write(Object message) {
-        return pipeline.write(message);
+    public Channel flush() {
+        pipeline.flush();
+        return this;
     }
 
     @Override
@@ -278,44 +276,49 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
     }
 
     @Override
-    public ByteBuf outboundByteBuffer() {
-        return pipeline.outboundByteBuffer();
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public <T> MessageBuf<T> outboundMessageBuffer() {
-        return (MessageBuf<T>) pipeline.outboundMessageBuffer();
-    }
-
-    @Override
-    public void read() {
+    public Channel read() {
         pipeline.read();
+        return this;
     }
 
     @Override
-    public ChannelFuture flush(ChannelPromise promise) {
-        return pipeline.flush(promise);
+    public ChannelFuture write(Object msg) {
+        return pipeline.write(msg);
     }
 
     @Override
-    public ChannelFuture write(Object message, ChannelPromise promise) {
-        return pipeline.write(message, promise);
+    public ChannelFuture write(Object msg, ChannelPromise promise) {
+        return pipeline.write(msg, promise);
+    }
+
+    @Override
+    public ChannelFuture writeAndFlush(Object msg) {
+        return pipeline.writeAndFlush(msg);
+    }
+
+    @Override
+    public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) {
+        return pipeline.writeAndFlush(msg, promise);
     }
 
     @Override
     public ChannelPromise newPromise() {
-        return new DefaultChannelPromise(this);
+        return pipeline.newPromise();
+    }
+
+    @Override
+    public ChannelProgressivePromise newProgressivePromise() {
+        return pipeline.newProgressivePromise();
     }
 
     @Override
     public ChannelFuture newSucceededFuture() {
-        return succeededFuture;
+        return pipeline.newSucceededFuture();
     }
 
     @Override
     public ChannelFuture newFailedFuture(Throwable cause) {
-        return new FailedChannelFuture(this, cause);
+        return pipeline.newFailedFuture(cause);
     }
 
     @Override
@@ -328,45 +331,6 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         return unsafe;
     }
 
-    @Override
-    public ChannelFuture sendFile(FileRegion region) {
-        return pipeline.sendFile(region);
-    }
-
-    @Override
-    public ChannelFuture sendFile(FileRegion region, ChannelPromise promise) {
-        return pipeline.sendFile(region, promise);
-    }
-
-    // 0 - not expanded because the buffer is writable
-    // 1 - expanded because the buffer was not writable
-    // 2 - could not expand because the buffer was at its maximum although the buffer is not writable.
-    protected static int expandReadBuffer(ByteBuf byteBuf) {
-        final int writerIndex = byteBuf.writerIndex();
-        final int capacity = byteBuf.capacity();
-        if (capacity != writerIndex) {
-            return 0;
-        }
-
-        final int maxCapacity = byteBuf.maxCapacity();
-        if (capacity == maxCapacity) {
-            return 2;
-        }
-
-        // FIXME: Magic number
-        final int increment = 4096;
-
-        if (writerIndex + increment > maxCapacity) {
-            // Expand to maximum capacity.
-            byteBuf.capacity(maxCapacity);
-        } else {
-            // Expand by the increment.
-            byteBuf.ensureWritable(increment);
-        }
-
-        return 1;
-    }
-
     /**
      * Create a new {@link AbstractUnsafe} instance which will be used for the life-time of the {@link Channel}
      */
@@ -377,7 +341,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      */
     @Override
     public final int hashCode() {
-        return id;
+        return id.hashCode();
     }
 
     /**
@@ -389,17 +353,18 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         return this == o;
     }
 
-    /**
-     * Compares the {@linkplain #id() ID} of the two channels.
-     */
     @Override
     public final int compareTo(Channel o) {
+        if (this == o) {
+            return 0;
+        }
+
         return id().compareTo(o.id());
     }
 
     /**
      * Returns the {@link String} representation of this channel.  The returned
-     * string contains the {@linkplain #id() ID}, {@linkplain #localAddress() local address},
+     * string contains the {@linkplain #hashCode() ID}, {@linkplain #localAddress() local address},
      * and {@linkplain #remoteAddress() remote address} of this channel for
      * easier identification.
      */
@@ -413,24 +378,39 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         SocketAddress remoteAddr = remoteAddress();
         SocketAddress localAddr = localAddress();
         if (remoteAddr != null) {
-            SocketAddress srcAddr;
-            SocketAddress dstAddr;
-            if (parent == null) {
-                srcAddr = localAddr;
-                dstAddr = remoteAddr;
-            } else {
-                srcAddr = remoteAddr;
-                dstAddr = localAddr;
-            }
-            strVal = String.format("[id: 0x%08x, %s %s %s]", id, srcAddr, active? "=>" : ":>", dstAddr);
+            StringBuilder buf = new StringBuilder(96)
+                .append("[id: 0x")
+                .append(id.asShortText())
+                .append(", L:")
+                .append(localAddr)
+                .append(active? " - " : " ! ")
+                .append("R:")
+                .append(remoteAddr)
+                .append(']');
+            strVal = buf.toString();
         } else if (localAddr != null) {
-            strVal = String.format("[id: 0x%08x, %s]", id, localAddr);
+            StringBuilder buf = new StringBuilder(64)
+                .append("[id: 0x")
+                .append(id.asShortText())
+                .append(", L:")
+                .append(localAddr)
+                .append(']');
+            strVal = buf.toString();
         } else {
-            strVal = String.format("[id: 0x%08x]", id);
+            StringBuilder buf = new StringBuilder(16)
+                .append("[id: 0x")
+                .append(id.asShortText())
+                .append(']');
+            strVal = buf.toString();
         }
 
         strValActive = active;
         return strVal;
+    }
+
+    @Override
+    public final ChannelPromise voidPromise() {
+        return pipeline.voidPromise();
     }
 
     /**
@@ -438,114 +418,27 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      */
     protected abstract class AbstractUnsafe implements Unsafe {
 
-        private final class FlushTask {
-            final FileRegion region;
-            final ChannelPromise promise;
-            FlushTask next;
+        private volatile ChannelOutboundBuffer outboundBuffer = new ChannelOutboundBuffer(AbstractChannel.this);
+        private RecvByteBufAllocator.Handle recvHandle;
+        private boolean inFlush0;
+        /** true if the channel has never been registered, false otherwise */
+        private boolean neverRegistered = true;
 
-            FlushTask(FileRegion region, ChannelPromise promise) {
-                this.region = region;
-                this.promise = promise;
-                promise.addListener(new ChannelFutureListener() {
-                    @Override
-                    public void operationComplete(ChannelFuture future) throws Exception {
-                        flushTaskInProgress = next;
-                        if (next != null) {
-                            try {
-                                FileRegion region = next.region;
-                                if (region == null) {
-                                    // no region present means the next flush task was to directly flush
-                                    // the outbound buffer
-                                    flushNotifierAndFlush(next.promise);
-                                } else {
-                                    // flush the region now
-                                    doFlushFileRegion(region, next.promise);
-                                }
-                            } catch (Throwable cause) {
-                                next.promise.setFailure(cause);
-                            }
-                        } else {
-                            // notify the flush futures
-                            flushFutureNotifier.notifyFlushFutures();
-                        }
-                    }
-                });
-            }
-        }
-
-        private final Runnable beginReadTask = new Runnable() {
-            @Override
-            public void run() {
-                beginRead();
-            }
-        };
-
-        private final Runnable flushLaterTask = new Runnable() {
-            @Override
-            public void run() {
-                flushNowPending = false;
-                flush(voidFuture());
-            }
-        };
-
-        @Override
-        public final void sendFile(final FileRegion region, final ChannelPromise promise) {
-
-            if (eventLoop().inEventLoop()) {
-                if (outboundBufSize() > 0) {
-                    flushNotifier(newPromise()).addListener(new ChannelFutureListener() {
-                        @Override
-                        public void operationComplete(ChannelFuture cf) throws Exception {
-                            sendFile0(region, promise);
-                        }
-                    });
-                } else {
-                    // nothing pending try to send the fileRegion now!
-                    sendFile0(region, promise);
-                }
-            } else {
-                eventLoop().execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        sendFile(region, promise);
-                    }
-                });
-            }
-        }
-
-        private void sendFile0(FileRegion region, ChannelPromise promise) {
-            if (flushTaskInProgress == null) {
-                flushTaskInProgress = new FlushTask(region, promise);
-                try {
-                    // the first FileRegion to flush so trigger it now!
-                    doFlushFileRegion(region, promise);
-                } catch (Throwable cause) {
-                    region.close();
-                    promise.setFailure(cause);
-                }
-                return;
-            }
-
-            FlushTask task = flushTaskInProgress;
-            for (;;) {
-                FlushTask next = task.next;
-                if (next == null) {
-                    break;
-                }
-                task = next;
-            }
-            // there is something that needs to get flushed first so add it as next in the chain
-            task.next = new FlushTask(region, promise);
+        private void assertEventLoop() {
+            assert !registered || eventLoop.inEventLoop();
         }
 
         @Override
-        public final ChannelHandlerContext directOutboundContext() {
-            return pipeline.head;
+        public RecvByteBufAllocator.Handle recvBufAllocHandle() {
+            if (recvHandle == null) {
+                recvHandle = config().getRecvByteBufAllocator().newHandle();
+            }
+            return recvHandle;
         }
 
         @Override
-        public final ChannelPromise voidFuture() {
-            return voidPromise;
+        public final ChannelOutboundBuffer outboundBuffer() {
+            return outboundBuffer;
         }
 
         @Override
@@ -564,167 +457,248 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 throw new NullPointerException("eventLoop");
             }
             if (isRegistered()) {
-                throw new IllegalStateException("registered to an event loop already");
+                promise.setFailure(new IllegalStateException("registered to an event loop already"));
+                return;
             }
             if (!isCompatible(eventLoop)) {
-                throw new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName());
+                promise.setFailure(
+                        new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName()));
+                return;
             }
 
             AbstractChannel.this.eventLoop = eventLoop;
 
-            assert eventLoop().inEventLoop();
-
-            if (!ensureOpen(promise)) {
-                return;
-            }
-
-            // check if the eventLoop which was given is currently in the eventloop.
-            // if that is the case we are safe to call register, if not we need to
-            // schedule the execution as otherwise we may say some race-conditions.
-            //
-            // See https://github.com/netty/netty/issues/654
             if (eventLoop.inEventLoop()) {
                 register0(promise);
             } else {
-                eventLoop.execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        register0(promise);
-                    }
-                });
+                try {
+                    eventLoop.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            register0(promise);
+                        }
+                    });
+                } catch (Throwable t) {
+                    logger.warn(
+                            "Force-closing a channel whose registration task was not accepted by an event loop: {}",
+                            AbstractChannel.this, t);
+                    closeForcibly();
+                    closeFuture.setClosed();
+                    safeSetFailure(promise, t);
+                }
             }
         }
 
         private void register0(ChannelPromise promise) {
             try {
-                Runnable postRegisterTask = doRegister();
-                registered = true;
-                promise.setSuccess();
-                pipeline.fireChannelRegistered();
-                if (postRegisterTask != null) {
-                    postRegisterTask.run();
+                // check if the channel is still open as it could be closed in the mean time when the register
+                // call was outside of the eventLoop
+                if (!promise.setUncancellable() || !ensureOpen(promise)) {
+                    return;
                 }
+                boolean firstRegistration = neverRegistered;
+                doRegister();
+                neverRegistered = false;
+                registered = true;
+
+                // Ensure we call handlerAdded(...) before we actually notify the promise. This is needed as the
+                // user may already fire events through the pipeline in the ChannelFutureListener.
+                pipeline.invokeHandlerAddedIfNeeded();
+
+                safeSetSuccess(promise);
+                pipeline.fireChannelRegistered();
+                // Only fire a channelActive if the channel has never been registered. This prevents firing
+                // multiple channel actives if the channel is deregistered and re-registered.
                 if (isActive()) {
-                    pipeline.fireChannelActive();
+                    if (firstRegistration) {
+                        pipeline.fireChannelActive();
+                    } else if (config().isAutoRead()) {
+                        // This channel was registered before and autoRead() is set. This means we need to begin read
+                        // again so that we process inbound data.
+                        //
+                        // See https://github.com/netty/netty/issues/4805
+                        beginRead();
+                    }
                 }
             } catch (Throwable t) {
                 // Close the channel directly to avoid FD leak.
-                try {
-                    doClose();
-                } catch (Throwable t2) {
-                    logger.warn("Failed to close a channel", t2);
-                }
-
-                promise.setFailure(t);
+                closeForcibly();
                 closeFuture.setClosed();
+                safeSetFailure(promise, t);
             }
         }
 
         @Override
         public final void bind(final SocketAddress localAddress, final ChannelPromise promise) {
-            if (eventLoop().inEventLoop()) {
-                if (!ensureOpen(promise)) {
-                    return;
-                }
+            assertEventLoop();
 
-                try {
-                    boolean wasActive = isActive();
+            if (!promise.setUncancellable() || !ensureOpen(promise)) {
+                return;
+            }
 
-                    // See: https://github.com/netty/netty/issues/576
-                    if (!PlatformDependent.isWindows() && !PlatformDependent.isRoot() &&
-                        Boolean.TRUE.equals(config().getOption(ChannelOption.SO_BROADCAST)) &&
-                        localAddress instanceof InetSocketAddress &&
-                        !((InetSocketAddress) localAddress).getAddress().isAnyLocalAddress()) {
-                        // Warn a user about the fact that a non-root user can't receive a
-                        // broadcast packet on *nix if the socket is bound on non-wildcard address.
-                        logger.warn(
-                                "A non-root user can't receive a broadcast packet if the socket " +
-                                "is not bound to a wildcard address; binding to a non-wildcard " +
-                                "address (" + localAddress + ") anyway as requested.");
-                    }
+            // See: https://github.com/netty/netty/issues/576
+            if (Boolean.TRUE.equals(config().getOption(ChannelOption.SO_BROADCAST)) &&
+                localAddress instanceof InetSocketAddress &&
+                !((InetSocketAddress) localAddress).getAddress().isAnyLocalAddress() &&
+                !PlatformDependent.isWindows() && !PlatformDependent.maybeSuperUser()) {
+                // Warn a user about the fact that a non-root user can't receive a
+                // broadcast packet on *nix if the socket is bound on non-wildcard address.
+                logger.warn(
+                        "A non-root user can't receive a broadcast packet if the socket " +
+                        "is not bound to a wildcard address; binding to a non-wildcard " +
+                        "address (" + localAddress + ") anyway as requested.");
+            }
 
-                    doBind(localAddress);
-                    promise.setSuccess();
-                    if (!wasActive && isActive()) {
-                        pipeline.fireChannelActive();
-                    }
-                } catch (Throwable t) {
-                    promise.setFailure(t);
-                    closeIfClosed();
-                }
-            } else {
-                eventLoop().execute(new Runnable() {
+            boolean wasActive = isActive();
+            try {
+                doBind(localAddress);
+            } catch (Throwable t) {
+                safeSetFailure(promise, t);
+                closeIfClosed();
+                return;
+            }
+
+            if (!wasActive && isActive()) {
+                invokeLater(new Runnable() {
                     @Override
                     public void run() {
-                        bind(localAddress, promise);
+                        pipeline.fireChannelActive();
                     }
                 });
             }
+
+            safeSetSuccess(promise);
         }
 
         @Override
         public final void disconnect(final ChannelPromise promise) {
-            if (eventLoop().inEventLoop()) {
-                try {
-                    boolean wasActive = isActive();
-                    doDisconnect();
-                    promise.setSuccess();
-                    if (wasActive && !isActive()) {
-                        pipeline.fireChannelInactive();
-                    }
-                } catch (Throwable t) {
-                    promise.setFailure(t);
-                    closeIfClosed();
-                }
-            } else {
-                eventLoop().execute(new Runnable() {
+            assertEventLoop();
+
+            if (!promise.setUncancellable()) {
+                return;
+            }
+
+            boolean wasActive = isActive();
+            try {
+                doDisconnect();
+            } catch (Throwable t) {
+                safeSetFailure(promise, t);
+                closeIfClosed();
+                return;
+            }
+
+            if (wasActive && !isActive()) {
+                invokeLater(new Runnable() {
                     @Override
                     public void run() {
-                        disconnect(promise);
+                        pipeline.fireChannelInactive();
                     }
                 });
             }
+
+            safeSetSuccess(promise);
+            closeIfClosed(); // doDisconnect() might have closed the channel
         }
 
         @Override
         public final void close(final ChannelPromise promise) {
-            if (eventLoop().inEventLoop()) {
-                boolean wasActive = isActive();
-                if (closeFuture.setClosed()) {
-                    try {
-                        doClose();
-                        promise.setSuccess();
-                    } catch (Throwable t) {
-                        promise.setFailure(t);
-                    }
+            assertEventLoop();
 
-                    if (closedChannelException != null) {
-                        closedChannelException = new ClosedChannelException();
-                    }
+            close(promise, CLOSE_CLOSED_CHANNEL_EXCEPTION, CLOSE_CLOSED_CHANNEL_EXCEPTION, false);
+        }
 
-                    flushFutureNotifier.notifyFlushFutures(closedChannelException);
+        private void close(final ChannelPromise promise, final Throwable cause,
+                           final ClosedChannelException closeCause, final boolean notify) {
+            if (!promise.setUncancellable()) {
+                return;
+            }
 
-                    if (wasActive && !isActive()) {
-                        pipeline.fireChannelInactive();
-                    }
-
-                    deregister(voidFuture());
-                } else {
-                    // Closed already.
-                    promise.setSuccess();
+            final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            if (outboundBuffer == null) {
+                // Only needed if no VoidChannelPromise.
+                if (!(promise instanceof VoidChannelPromise)) {
+                    // This means close() was called before so we just register a listener and return
+                    closeFuture.addListener(new ChannelFutureListener() {
+                        @Override
+                        public void operationComplete(ChannelFuture future) throws Exception {
+                            promise.setSuccess();
+                        }
+                    });
                 }
-            } else {
-                eventLoop().execute(new Runnable() {
+                return;
+            }
+
+            if (closeFuture.isDone()) {
+                // Closed already.
+                safeSetSuccess(promise);
+                return;
+            }
+
+            final boolean wasActive = isActive();
+            this.outboundBuffer = null; // Disallow adding any messages and flushes to outboundBuffer.
+            Executor closeExecutor = prepareToClose();
+            if (closeExecutor != null) {
+                closeExecutor.execute(new Runnable() {
                     @Override
                     public void run() {
-                        close(promise);
+                        try {
+                            // Execute the close.
+                            doClose0(promise);
+                        } finally {
+                            // Call invokeLater so closeAndDeregister is executed in the EventLoop again!
+                            invokeLater(new Runnable() {
+                                @Override
+                                public void run() {
+                                    // Fail all the queued messages
+                                    outboundBuffer.failFlushed(cause, notify);
+                                    outboundBuffer.close(closeCause);
+                                    fireChannelInactiveAndDeregister(wasActive);
+                                }
+                            });
+                        }
                     }
                 });
+            } else {
+                try {
+                    // Close the channel and fail the queued messages in all cases.
+                    doClose0(promise);
+                } finally {
+                    // Fail all the queued messages.
+                    outboundBuffer.failFlushed(cause, notify);
+                    outboundBuffer.close(closeCause);
+                }
+                if (inFlush0) {
+                    invokeLater(new Runnable() {
+                        @Override
+                        public void run() {
+                            fireChannelInactiveAndDeregister(wasActive);
+                        }
+                    });
+                } else {
+                    fireChannelInactiveAndDeregister(wasActive);
+                }
             }
+        }
+
+        private void doClose0(ChannelPromise promise) {
+            try {
+                doClose();
+                closeFuture.setClosed();
+                safeSetSuccess(promise);
+            } catch (Throwable t) {
+                closeFuture.setClosed();
+                safeSetFailure(promise, t);
+            }
+        }
+
+        private void fireChannelInactiveAndDeregister(final boolean wasActive) {
+            deregister(voidPromise(), wasActive && !isActive());
         }
 
         @Override
         public final void closeForcibly() {
+            assertEventLoop();
+
             try {
                 doClose();
             } catch (Exception e) {
@@ -734,191 +708,257 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
         @Override
         public final void deregister(final ChannelPromise promise) {
-            if (eventLoop().inEventLoop()) {
-                if (!registered) {
-                    promise.setSuccess();
-                    return;
-                }
+            assertEventLoop();
 
-                try {
-                    doDeregister();
-                } catch (Throwable t) {
-                    logger.warn("Unexpected exception occurred while deregistering a channel.", t);
-                } finally {
-                    if (registered) {
-                        registered = false;
-                        promise.setSuccess();
-                        pipeline.fireChannelUnregistered();
-                    } else {
+            deregister(promise, false);
+        }
+
+        private void deregister(final ChannelPromise promise, final boolean fireChannelInactive) {
+            if (!promise.setUncancellable()) {
+                return;
+            }
+
+            if (!registered) {
+                safeSetSuccess(promise);
+                return;
+            }
+
+            // As a user may call deregister() from within any method while doing processing in the ChannelPipeline,
+            // we need to ensure we do the actual deregister operation later. This is needed as for example,
+            // we may be in the ByteToMessageDecoder.callDecode(...) method and so still try to do processing in
+            // the old EventLoop while the user already registered the Channel to a new EventLoop. Without delay,
+            // the deregister operation this could lead to have a handler invoked by different EventLoop and so
+            // threads.
+            //
+            // See:
+            // https://github.com/netty/netty/issues/4435
+            invokeLater(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        doDeregister();
+                    } catch (Throwable t) {
+                        logger.warn("Unexpected exception occurred while deregistering a channel.", t);
+                    } finally {
+                        if (fireChannelInactive) {
+                            pipeline.fireChannelInactive();
+                        }
                         // Some transports like local and AIO does not allow the deregistration of
-                        // an open channel.  Their doDeregister() calls close().  Consequently,
-                        // close() calls deregister() again - no need to fire channelUnregistered.
-                        promise.setSuccess();
+                        // an open channel.  Their doDeregister() calls close(). Consequently,
+                        // close() calls deregister() again - no need to fire channelUnregistered, so check
+                        // if it was registered.
+                        if (registered) {
+                            registered = false;
+                            pipeline.fireChannelUnregistered();
+                        }
+                        safeSetSuccess(promise);
                     }
                 }
-            } else {
-                eventLoop().execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        deregister(promise);
-                    }
-                });
-            }
+            });
         }
 
         @Override
-        public void beginRead() {
+        public final void beginRead() {
+            assertEventLoop();
+
             if (!isActive()) {
                 return;
             }
 
-            if (eventLoop().inEventLoop()) {
-                try {
-                    doBeginRead();
-                } catch (Exception e) {
-                    pipeline().fireExceptionCaught(e);
-                    close(unsafe().voidFuture());
-                }
-            } else {
-                eventLoop().execute(beginReadTask);
-            }
-        }
-
-        @Override
-        public void flush(final ChannelPromise promise) {
-            if (eventLoop().inEventLoop()) {
-
-                if (flushTaskInProgress != null) {
-                    FlushTask task = flushTaskInProgress;
-
-                    // loop over the tasks to find the last one
-                    for (;;) {
-                        FlushTask t = task.next;
-                        if (t == null) {
-                            break;
-                        }
-                        task = t.next;
-                    }
-                    task.next = new FlushTask(null, promise);
-
-                    return;
-                }
-                flushNotifierAndFlush(promise);
-            } else {
-                eventLoop().execute(new Runnable() {
+            try {
+                doBeginRead();
+            } catch (final Exception e) {
+                invokeLater(new Runnable() {
                     @Override
                     public void run() {
-                        flush(promise);
+                        pipeline.fireExceptionCaught(e);
                     }
                 });
+                close(voidPromise());
             }
         }
 
-        private void flushNotifierAndFlush(ChannelPromise promise) {
-            flushNotifier(promise);
-            flush0();
-        }
-
-        private int outboundBufSize() {
-            final int bufSize;
-            final ChannelHandlerContext ctx = directOutboundContext();
-            if (ctx.hasOutboundByteBuffer()) {
-                bufSize = ctx.outboundByteBuffer().readableBytes();
-            } else {
-                bufSize = ctx.outboundMessageBuffer().size();
-            }
-            return bufSize;
-        }
-
-        private ChannelFuture flushNotifier(ChannelPromise promise) {
-            // Append flush future to the notification list.
-            if (promise != voidPromise) {
-                flushFutureNotifier.addFlushFuture(promise, outboundBufSize());
-            }
-            return promise;
-        }
-
-        private void flush0() {
-            if (!inFlushNow) { // Avoid re-entrance
-                try {
-                    if (!isFlushPending()) {
-                        flushNow();
-                    } else {
-                        // Event loop will call flushNow() later by itself.
-                    }
-                } catch (Throwable t) {
-                    flushFutureNotifier.notifyFlushFutures(t);
-                    if (t instanceof IOException) {
-                        close(voidFuture());
-                    }
-                }
-            } else {
-                if (!flushNowPending) {
-                    flushNowPending = true;
-                    eventLoop().execute(flushLaterTask);
-                }
-            }
-        }
         @Override
-        public final void flushNow() {
-            if (inFlushNow || flushTaskInProgress != null) {
+        public final void write(Object msg, ChannelPromise promise) {
+            assertEventLoop();
+
+            ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            if (outboundBuffer == null) {
+                // If the outboundBuffer is null we know the channel was closed and so
+                // need to fail the future right away. If it is not null the handling of the rest
+                // will be done in flush0()
+                // See https://github.com/netty/netty/issues/2362
+                safeSetFailure(promise, WRITE_CLOSED_CHANNEL_EXCEPTION);
+                // release message now to prevent resource-leak
+                ReferenceCountUtil.release(msg);
                 return;
             }
 
-            inFlushNow = true;
-            ChannelHandlerContext ctx = directOutboundContext();
-            Throwable cause = null;
+            int size;
             try {
-                if (ctx.hasOutboundByteBuffer()) {
-                    ByteBuf out = ctx.outboundByteBuffer();
-                    int oldSize = out.readableBytes();
-                    try {
-                        doFlushByteBuffer(out);
-                    } catch (Throwable t) {
-                        cause = t;
-                    } finally {
-                        flushFutureNotifier.increaseWriteCounter(oldSize - out.readableBytes());
-                    }
-                } else {
-                    MessageBuf<Object> out = ctx.outboundMessageBuffer();
-                    int oldSize = out.size();
-                    try {
-                        doFlushMessageBuffer(out);
-                    } catch (Throwable t) {
-                        cause = t;
-                    } finally {
-                        flushFutureNotifier.increaseWriteCounter(oldSize - out.size());
-                    }
+                msg = filterOutboundMessage(msg);
+                size = pipeline.estimatorHandle().size(msg);
+                if (size < 0) {
+                    size = 0;
                 }
+            } catch (Throwable t) {
+                safeSetFailure(promise, t);
+                ReferenceCountUtil.release(msg);
+                return;
+            }
 
-                if (cause == null) {
-                    flushFutureNotifier.notifyFlushFutures();
-                } else {
-                    flushFutureNotifier.notifyFlushFutures(cause);
-                    if (cause instanceof IOException) {
-                        close(voidFuture());
+            outboundBuffer.addMessage(msg, size, promise);
+        }
+
+        @Override
+        public final void flush() {
+            assertEventLoop();
+
+            ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            if (outboundBuffer == null) {
+                return;
+            }
+
+            outboundBuffer.addFlush();
+            flush0();
+        }
+
+        @SuppressWarnings("deprecation")
+        protected void flush0() {
+            if (inFlush0) {
+                // Avoid re-entrance
+                return;
+            }
+
+            final ChannelOutboundBuffer outboundBuffer = this.outboundBuffer;
+            if (outboundBuffer == null || outboundBuffer.isEmpty()) {
+                return;
+            }
+
+            inFlush0 = true;
+
+            // Mark all pending write requests as failure if the channel is inactive.
+            if (!isActive()) {
+                try {
+                    if (isOpen()) {
+                        outboundBuffer.failFlushed(FLUSH0_NOT_YET_CONNECTED_EXCEPTION, true);
+                    } else {
+                        // Do not trigger channelWritabilityChanged because the channel is closed already.
+                        outboundBuffer.failFlushed(FLUSH0_CLOSED_CHANNEL_EXCEPTION, false);
                     }
+                } finally {
+                    inFlush0 = false;
+                }
+                return;
+            }
+
+            try {
+                doWrite(outboundBuffer);
+            } catch (Throwable t) {
+                if (t instanceof IOException && config().isAutoClose()) {
+                    /**
+                     * Just call {@link #close(ChannelPromise, Throwable, boolean)} here which will take care of
+                     * failing all flushed messages and also ensure the actual close of the underlying transport
+                     * will happen before the promises are notified.
+                     *
+                     * This is needed as otherwise {@link #isActive()} , {@link #isOpen()} and {@link #isWritable()}
+                     * may still return {@code true} even if the channel should be closed as result of the exception.
+                     */
+                    close(voidPromise(), t, FLUSH0_CLOSED_CHANNEL_EXCEPTION, false);
+                } else {
+                    outboundBuffer.failFlushed(t, true);
                 }
             } finally {
-                inFlushNow = false;
+                inFlush0 = false;
             }
         }
 
+        @Override
+        public final ChannelPromise voidPromise() {
+            assertEventLoop();
+
+            return unsafeVoidPromise;
+        }
+
+        @Deprecated
         protected final boolean ensureOpen(ChannelPromise promise) {
             if (isOpen()) {
                 return true;
             }
 
-            Exception e = new ClosedChannelException();
-            promise.setFailure(e);
+            safeSetFailure(promise, ENSURE_OPEN_CLOSED_CHANNEL_EXCEPTION);
             return false;
+        }
+
+        /**
+         * Marks the specified {@code promise} as success.  If the {@code promise} is done already, log a message.
+         */
+        protected final void safeSetSuccess(ChannelPromise promise) {
+            if (!(promise instanceof VoidChannelPromise) && !promise.trySuccess()) {
+                logger.warn("Failed to mark a promise as success because it is done already: {}", promise);
+            }
+        }
+
+        /**
+         * Marks the specified {@code promise} as failure.  If the {@code promise} is done already, log a message.
+         */
+        protected final void safeSetFailure(ChannelPromise promise, Throwable cause) {
+            if (!(promise instanceof VoidChannelPromise) && !promise.tryFailure(cause)) {
+                logger.warn("Failed to mark a promise as failure because it's done already: {}", promise, cause);
+            }
         }
 
         protected final void closeIfClosed() {
             if (isOpen()) {
                 return;
             }
-            close(voidFuture());
+            close(voidPromise());
+        }
+
+        private void invokeLater(Runnable task) {
+            try {
+                // This method is used by outbound operation implementations to trigger an inbound event later.
+                // They do not trigger an inbound event immediately because an outbound operation might have been
+                // triggered by another inbound event handler method.  If fired immediately, the call stack
+                // will look like this for example:
+                //
+                //   handlerA.inboundBufferUpdated() - (1) an inbound handler method closes a connection.
+                //   -> handlerA.ctx.close()
+                //      -> channel.unsafe.close()
+                //         -> handlerA.channelInactive() - (2) another inbound handler method called while in (1) yet
+                //
+                // which means the execution of two inbound handler methods of the same handler overlap undesirably.
+                eventLoop().execute(task);
+            } catch (RejectedExecutionException e) {
+                logger.warn("Can't invoke task later as EventLoop rejected it", e);
+            }
+        }
+
+        /**
+         * Appends the remote address to the message of the exceptions caused by connection attempt failure.
+         */
+        protected final Throwable annotateConnectException(Throwable cause, SocketAddress remoteAddress) {
+            if (cause instanceof ConnectException) {
+                return new AnnotatedConnectException((ConnectException) cause, remoteAddress);
+            }
+            if (cause instanceof NoRouteToHostException) {
+                return new AnnotatedNoRouteToHostException((NoRouteToHostException) cause, remoteAddress);
+            }
+            if (cause instanceof SocketException) {
+                return new AnnotatedSocketException((SocketException) cause, remoteAddress);
+            }
+
+            return cause;
+        }
+
+        /**
+         * Prepares to close the {@link Channel}. If this method returns an {@link Executor}, the
+         * caller must call the {@link Executor#execute(Runnable)} method with a task that calls
+         * {@link #doClose()} on the returned {@link Executor}. If this method returns {@code null},
+         * {@link #doClose()} must be called from the caller thread. (i.e. {@link EventLoop})
+         */
+        protected Executor prepareToClose() {
+            return null;
         }
     }
 
@@ -939,12 +979,11 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
     /**
      * Is called after the {@link Channel} is registered with its {@link EventLoop} as part of the register process.
-     * You can return a {@link Runnable} which will be run as post-task of the registration process.
      *
-     * Sub-classes may override this method as it will just return {@code null}
+     * Sub-classes may override this method
      */
-    protected Runnable doRegister() throws Exception {
-        return null;
+    protected void doRegister() throws Exception {
+        // NOOP
     }
 
     /**
@@ -956,14 +995,6 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      * Disconnect this {@link Channel} from its remote peer
      */
     protected abstract void doDisconnect() throws Exception;
-
-    /**
-     * Will be called before the actual close operation will be performed. Sub-classes may override this as the default
-     * is to do nothing.
-     */
-    protected void doPreClose() throws Exception {
-        // NOOP by default
-    }
 
     /**
      * Close the {@link Channel}
@@ -985,58 +1016,31 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
     protected abstract void doBeginRead() throws Exception;
 
     /**
-     * Flush the content of the given {@link ByteBuf} to the remote peer.
-     *
-     * Sub-classes may override this as this implementation will just thrown an {@link UnsupportedOperationException}
+     * Flush the content of the given buffer to the remote peer.
      */
-    protected void doFlushByteBuffer(ByteBuf buf) throws Exception {
-        throw new UnsupportedOperationException();
-    }
+    protected abstract void doWrite(ChannelOutboundBuffer in) throws Exception;
 
     /**
-     * Flush the content of the given {@link MessageBuf} to the remote peer.
-     *
-     * Sub-classes may override this as this implementation will just thrown an {@link UnsupportedOperationException}
+     * Invoked when a new message is added to a {@link ChannelOutboundBuffer} of this {@link AbstractChannel}, so that
+     * the {@link Channel} implementation converts the message to another. (e.g. heap buffer -> direct buffer)
      */
-    protected void doFlushMessageBuffer(MessageBuf<Object> buf) throws Exception {
-        throw new UnsupportedOperationException();
+    protected Object filterOutboundMessage(Object msg) throws Exception {
+        return msg;
     }
 
-    /**
-     * Flush the content of the given {@link FileRegion} to the remote peer.
-     *
-     * Sub-classes may override this as this implementation will just thrown an {@link UnsupportedOperationException}
-     */
-    protected void doFlushFileRegion(FileRegion region, ChannelPromise promise) throws Exception {
-        throw new UnsupportedOperationException();
-    }
-
-    protected static void checkEOF(FileRegion region, long writtenBytes) throws IOException {
-        if (writtenBytes < region.count()) {
-            throw new EOFException("Expected to be able to write "
-                    + region.count() + " bytes, but only wrote "
-                    + writtenBytes);
-        }
-    }
-
-    /**
-     * Return {@code true} if a flush to the {@link Channel} is currently pending.
-     */
-    protected abstract boolean isFlushPending();
-
-    private final class CloseFuture extends DefaultChannelPromise implements ChannelFuture.Unsafe {
+    static final class CloseFuture extends DefaultChannelPromise {
 
         CloseFuture(AbstractChannel ch) {
             super(ch);
         }
 
         @Override
-        public void setSuccess() {
+        public ChannelPromise setSuccess() {
             throw new IllegalStateException();
         }
 
         @Override
-        public void setFailure(Throwable cause) {
+        public ChannelPromise setFailure(Throwable cause) {
             throw new IllegalStateException();
         }
 
@@ -1051,12 +1055,55 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
         }
 
         boolean setClosed() {
-            try {
-                doPreClose();
-            } catch (Exception e) {
-                logger.warn("doPreClose() raised an exception.", e);
-            }
             return super.trySuccess();
+        }
+    }
+
+    private static final class AnnotatedConnectException extends ConnectException {
+
+        private static final long serialVersionUID = 3901958112696433556L;
+
+        AnnotatedConnectException(ConnectException exception, SocketAddress remoteAddress) {
+            super(exception.getMessage() + ": " + remoteAddress);
+            initCause(exception);
+            setStackTrace(exception.getStackTrace());
+        }
+
+        @Override
+        public Throwable fillInStackTrace() {
+            return this;
+        }
+    }
+
+    private static final class AnnotatedNoRouteToHostException extends NoRouteToHostException {
+
+        private static final long serialVersionUID = -6801433937592080623L;
+
+        AnnotatedNoRouteToHostException(NoRouteToHostException exception, SocketAddress remoteAddress) {
+            super(exception.getMessage() + ": " + remoteAddress);
+            initCause(exception);
+            setStackTrace(exception.getStackTrace());
+        }
+
+        @Override
+        public Throwable fillInStackTrace() {
+            return this;
+        }
+    }
+
+    private static final class AnnotatedSocketException extends SocketException {
+
+        private static final long serialVersionUID = 3896743275010454039L;
+
+        AnnotatedSocketException(SocketException exception, SocketAddress remoteAddress) {
+            super(exception.getMessage() + ": " + remoteAddress);
+            initCause(exception);
+            setStackTrace(exception.getStackTrace());
+        }
+
+        @Override
+        public Throwable fillInStackTrace() {
+            return this;
         }
     }
 }

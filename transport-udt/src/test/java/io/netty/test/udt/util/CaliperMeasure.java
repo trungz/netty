@@ -139,6 +139,7 @@ public class CaliperMeasure {
     /**
      * Perform measurement; convert from metrics into caliper.
      */
+    @SuppressWarnings("FloatingPointEquality")
     public void mark() {
         final double rateValue = filter(rate.oneMinuteRate());
         final double timeValue = filter(time.mean());
@@ -147,21 +148,18 @@ public class CaliperMeasure {
             /** ignore complete blank entries */
             return;
         }
-        {
-            final Measurement mark = new Measurement(RATE_UNIT, rateValue,
-                    rateValue);
-            rateMap.put(System.nanoTime(), mark);
-        }
-        {
-            final Measurement mark = new Measurement(TIME_UNIT, timeValue,
-                    timeValue);
-            timeMap.put(System.nanoTime(), mark);
-        }
-        {
-            final Measurement mark = new Measurement(SIZE_UNIT, sizeValue,
-                    sizeValue);
-            sizeMap.put(System.nanoTime(), mark);
-        }
+
+        final Measurement markRate = new Measurement(RATE_UNIT, rateValue,
+                rateValue);
+        rateMap.put(System.nanoTime(), markRate);
+
+        final Measurement markTime = new Measurement(TIME_UNIT, timeValue,
+                timeValue);
+        timeMap.put(System.nanoTime(), markTime);
+
+        final Measurement markSize = new Measurement(SIZE_UNIT, sizeValue,
+                sizeValue);
+        sizeMap.put(System.nanoTime(), markSize);
     }
 
     private final Map<String, String> variables = new HashMap<String, String>();
@@ -175,8 +173,7 @@ public class CaliperMeasure {
 
     private static MeasurementSet measurementSet(final Map<Long, Measurement> map) {
         final Measurement[] array = map.values().toArray(new Measurement[map.size()]);
-        final MeasurementSet set = new MeasurementSet(array);
-        return set;
+        return new MeasurementSet(array);
     }
 
     /**

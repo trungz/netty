@@ -19,32 +19,27 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundMessageHandlerAdapter;
+import io.netty.channel.SimpleChannelInboundHandler;
 
 import java.net.InetAddress;
 import java.util.Date;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Handles a server-side channel.
  */
 @Sharable
-public class TelnetServerHandler extends ChannelInboundMessageHandlerAdapter<String> {
-
-    private static final Logger logger = Logger.getLogger(
-            TelnetServerHandler.class.getName());
+public class TelnetServerHandler extends SimpleChannelInboundHandler<String> {
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
         // Send greeting for a new connection.
-        ctx.write(
-                "Welcome to " + InetAddress.getLocalHost().getHostName() + "!\r\n");
+        ctx.write("Welcome to " + InetAddress.getLocalHost().getHostName() + "!\r\n");
         ctx.write("It is " + new Date() + " now.\r\n");
+        ctx.flush();
     }
 
     @Override
-    public void messageReceived(ChannelHandlerContext ctx, String request) throws Exception {
+    public void channelRead0(ChannelHandlerContext ctx, String request) throws Exception {
         // Generate and write a response.
         String response;
         boolean close = false;
@@ -69,10 +64,13 @@ public class TelnetServerHandler extends ChannelInboundMessageHandlerAdapter<Str
     }
 
     @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        logger.log(
-                Level.WARNING,
-                "Unexpected exception from downstream.", cause);
+    public void channelReadComplete(ChannelHandlerContext ctx) {
+        ctx.flush();
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        cause.printStackTrace();
         ctx.close();
     }
 }

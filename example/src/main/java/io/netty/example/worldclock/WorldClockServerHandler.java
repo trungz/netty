@@ -16,7 +16,7 @@
 package io.netty.example.worldclock;
 
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundMessageHandlerAdapter;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.example.worldclock.WorldClockProtocol.Continent;
 import io.netty.example.worldclock.WorldClockProtocol.DayOfWeek;
 import io.netty.example.worldclock.WorldClockProtocol.LocalTime;
@@ -26,18 +26,13 @@ import io.netty.example.worldclock.WorldClockProtocol.Locations;
 
 import java.util.Calendar;
 import java.util.TimeZone;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 import static java.util.Calendar.*;
 
-public class WorldClockServerHandler extends ChannelInboundMessageHandlerAdapter<Locations> {
-
-    private static final Logger logger = Logger.getLogger(
-            WorldClockServerHandler.class.getName());
+public class WorldClockServerHandler extends SimpleChannelInboundHandler<Locations> {
 
     @Override
-    public void messageReceived(ChannelHandlerContext ctx, Locations locations) throws Exception {
+    public void channelRead0(ChannelHandlerContext ctx, Locations locations) throws Exception {
         long currentTime = System.currentTimeMillis();
 
         LocalTimes.Builder builder = LocalTimes.newBuilder();
@@ -61,10 +56,13 @@ public class WorldClockServerHandler extends ChannelInboundMessageHandlerAdapter
     }
 
     @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        logger.log(
-                Level.WARNING,
-                "Unexpected exception from downstream.", cause);
+    public void channelReadComplete(ChannelHandlerContext ctx) {
+        ctx.flush();
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        cause.printStackTrace();
         ctx.close();
     }
 

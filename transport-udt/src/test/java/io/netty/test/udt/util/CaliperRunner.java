@@ -28,8 +28,8 @@ import com.google.caliper.Scenario;
 import com.google.caliper.ScenarioResult;
 import com.google.caliper.SimpleBenchmark;
 import com.yammer.metrics.core.TimerContext;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -50,8 +50,7 @@ import java.util.TreeSet;
  */
 public final class CaliperRunner {
 
-    private final static Logger log = LoggerFactory
-            .getLogger(CaliperRunner.class);
+    private static final InternalLogger log = InternalLoggerFactory.getInstance(CaliperRunner.class);
 
     private CaliperRunner() {
     }
@@ -203,18 +202,15 @@ public final class CaliperRunner {
     public static Run newRun(final String benchmarkName) {
         final Map<Scenario, ScenarioResult> measurements = new HashMap<Scenario, ScenarioResult>();
         final Date executedTimestamp = new Date();
-        final Run run = new Run(measurements, benchmarkName, executedTimestamp);
-        return run;
+        return new Run(measurements, benchmarkName, executedTimestamp);
     }
 
     /**
      * Make new result from run.
      */
     public static Result newResult(final Run run) {
-        final Environment env = new EnvironmentGetter()
-                .getEnvironmentSnapshot();
-        final Result result = new Result(run, env);
-        return result;
+        final Environment env = new EnvironmentGetter().getEnvironmentSnapshot();
+        return new Result(run, env);
     }
 
     /**

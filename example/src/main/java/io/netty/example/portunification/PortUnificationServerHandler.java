@@ -17,42 +17,44 @@ package io.netty.example.portunification;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundByteHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import io.netty.example.factorial.BigIntegerDecoder;
 import io.netty.example.factorial.FactorialServerHandler;
 import io.netty.example.factorial.NumberEncoder;
 import io.netty.example.http.snoop.HttpSnoopServerHandler;
-import io.netty.example.securechat.SecureChatSslContextFactory;
+import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.compression.ZlibCodecFactory;
 import io.netty.handler.codec.compression.ZlibWrapper;
 import io.netty.handler.codec.http.HttpContentCompressor;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpResponseEncoder;
+import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 
-import javax.net.ssl.SSLEngine;
+import java.util.List;
 
 /**
  * Manipulates the current pipeline dynamically to switch protocols or enable
  * SSL or GZIP.
  */
-public class PortUnificationServerHandler extends ChannelInboundByteHandlerAdapter {
+public class PortUnificationServerHandler extends ByteToMessageDecoder {
 
+    private final SslContext sslCtx;
     private final boolean detectSsl;
     private final boolean detectGzip;
 
-    public PortUnificationServerHandler() {
-        this(true, true);
+    public PortUnificationServerHandler(SslContext sslCtx) {
+        this(sslCtx, true, true);
     }
 
-    private PortUnificationServerHandler(boolean detectSsl, boolean detectGzip) {
+    private PortUnificationServerHandler(SslContext sslCtx, boolean detectSsl, boolean detectGzip) {
+        this.sslCtx = sslCtx;
         this.detectSsl = detectSsl;
         this.detectGzip = detectGzip;
     }
 
     @Override
-    public void inboundBufferUpdated(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
+    protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
         // Will use the first five bytes to detect a protocol.
         if (in.readableBytes() < 5) {
             return;
@@ -110,22 +112,17 @@ public class PortUnificationServerHandler extends ChannelInboundByteHandlerAdapt
 
     private void enableSsl(ChannelHandlerContext ctx) {
         ChannelPipeline p = ctx.pipeline();
-
-        SSLEngine engine =
-            SecureChatSslContextFactory.getServerContext().createSSLEngine();
-        engine.setUseClientMode(false);
-
-        p.addLast("ssl", new SslHandler(engine));
-        p.addLast("unificationA", new PortUnificationServerHandler(false, detectGzip));
-        p.removeAndForward(this);
+        p.addLast("ssl", sslCtx.newHandler(ctx.alloc()));
+        p.addLast("unificationA", new PortUnificationServerHandler(sslCtx, false, detectGzip));
+        p.remove(this);
     }
 
     private void enableGzip(ChannelHandlerContext ctx) {
         ChannelPipeline p = ctx.pipeline();
         p.addLast("gzipdeflater", ZlibCodecFactory.newZlibEncoder(ZlibWrapper.GZIP));
         p.addLast("gzipinflater", ZlibCodecFactory.newZlibDecoder(ZlibWrapper.GZIP));
-        p.addLast("unificationB", new PortUnificationServerHandler(detectSsl, false));
-        p.removeAndForward(this);
+        p.addLast("unificationB", new PortUnificationServerHandler(sslCtx, detectSsl, false));
+        p.remove(this);
     }
 
     private void switchToHttp(ChannelHandlerContext ctx) {
@@ -134,7 +131,7 @@ public class PortUnificationServerHandler extends ChannelInboundByteHandlerAdapt
         p.addLast("encoder", new HttpResponseEncoder());
         p.addLast("deflater", new HttpContentCompressor());
         p.addLast("handler", new HttpSnoopServerHandler());
-        p.removeAndForward(this);
+        p.remove(this);
     }
 
     private void switchToFactorial(ChannelHandlerContext ctx) {
@@ -142,6 +139,6 @@ public class PortUnificationServerHandler extends ChannelInboundByteHandlerAdapt
         p.addLast("decoder", new BigIntegerDecoder());
         p.addLast("encoder", new NumberEncoder());
         p.addLast("handler", new FactorialServerHandler());
-        p.removeAndForward(this);
+        p.remove(this);
     }
 }

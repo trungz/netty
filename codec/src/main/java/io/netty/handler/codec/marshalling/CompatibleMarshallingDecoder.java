@@ -24,6 +24,7 @@ import org.jboss.marshalling.ByteInput;
 import org.jboss.marshalling.Unmarshaller;
 
 import java.io.ObjectStreamConstants;
+import java.util.List;
 
 /**
  * {@link ReplayingDecoder} which use an {@link Unmarshaller} to read the Object out of the {@link ByteBuf}.
@@ -54,11 +55,11 @@ public class CompatibleMarshallingDecoder extends ReplayingDecoder<Void> {
     }
 
     @Override
-    protected Object decode(ChannelHandlerContext ctx, ByteBuf buffer) throws Exception {
+    protected void decode(ChannelHandlerContext ctx, ByteBuf buffer, List<Object> out) throws Exception {
         if (discardingTooLongFrame) {
             buffer.skipBytes(actualReadableBytes());
             checkpoint();
-            return null;
+            return;
         }
 
         Unmarshaller unmarshaller = provider.getUnmarshaller(ctx);
@@ -70,8 +71,8 @@ public class CompatibleMarshallingDecoder extends ReplayingDecoder<Void> {
             unmarshaller.start(input);
             Object obj = unmarshaller.readObject();
             unmarshaller.finish();
-            return obj;
-        } catch (LimitingByteInput.TooBigObjectException e) {
+            out.add(obj);
+        } catch (LimitingByteInput.TooBigObjectException ignored) {
             discardingTooLongFrame = true;
             throw new TooLongFrameException();
         } finally {
@@ -82,19 +83,19 @@ public class CompatibleMarshallingDecoder extends ReplayingDecoder<Void> {
     }
 
     @Override
-    protected Object decodeLast(ChannelHandlerContext ctx, ByteBuf buffer) throws Exception {
+    protected void decodeLast(ChannelHandlerContext ctx, ByteBuf buffer, List<Object> out) throws Exception {
         switch (buffer.readableBytes()) {
         case 0:
-            return null;
+            return;
         case 1:
             // Ignore the last TC_RESET
             if (buffer.getByte(buffer.readerIndex()) == ObjectStreamConstants.TC_RESET) {
                 buffer.skipBytes(1);
-                return null;
+                return;
             }
         }
 
-        return decode(ctx, buffer);
+        decode(ctx, buffer, out);
     }
 
     @Override

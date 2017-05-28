@@ -17,9 +17,12 @@ package io.netty.channel.socket;
 
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelConfig;
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandler;
 import io.netty.channel.ChannelOption;
+import io.netty.channel.MessageSizeEstimator;
+import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
 
 import java.net.Socket;
 import java.net.StandardSocketOptions;
@@ -148,7 +151,8 @@ public interface SocketChannelConfig extends ChannelConfig {
     /**
      * Sets whether the channel should not close itself when its remote peer shuts down output to
      * make the connection half-closed.  If {@code true} the connection is not closed when the
-     * remote peer shuts down output. Instead, {@link ChannelHandler#userEventTriggered(ChannelHandlerContext, Object)}
+     * remote peer shuts down output. Instead,
+     * {@link ChannelInboundHandler#userEventTriggered(ChannelHandlerContext, Object)}
      * is invoked with a {@link ChannelInputShutdownEvent} object. If {@code false}, the connection
      * is closed automatically.
      */
@@ -158,11 +162,28 @@ public interface SocketChannelConfig extends ChannelConfig {
     SocketChannelConfig setConnectTimeoutMillis(int connectTimeoutMillis);
 
     @Override
+    @Deprecated
+    SocketChannelConfig setMaxMessagesPerRead(int maxMessagesPerRead);
+
+    @Override
     SocketChannelConfig setWriteSpinCount(int writeSpinCount);
 
     @Override
     SocketChannelConfig setAllocator(ByteBufAllocator allocator);
 
     @Override
+    SocketChannelConfig setRecvByteBufAllocator(RecvByteBufAllocator allocator);
+
+    @Override
     SocketChannelConfig setAutoRead(boolean autoRead);
+
+    @Override
+    SocketChannelConfig setAutoClose(boolean autoClose);
+
+    @Override
+    SocketChannelConfig setMessageSizeEstimator(MessageSizeEstimator estimator);
+
+    @Override
+    SocketChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark);
+
 }

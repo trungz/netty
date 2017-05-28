@@ -15,27 +15,33 @@
  */
 package io.netty.handler.codec.socks;
 
-import io.netty.channel.embedded.EmbeddedByteChannel;
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.util.internal.SocketUtils;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.junit.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import sun.net.util.IPAddressUtil;
+
+import java.net.UnknownHostException;
 
 import static org.junit.Assert.*;
 
 public class SocksCmdRequestDecoderTest {
-    private static final Logger logger = LoggerFactory.getLogger(SocksCmdRequestDecoderTest.class);
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(SocksCmdRequestDecoderTest.class);
 
-    private static void testSocksCmdRequestDecoderWithDifferentParams(SocksMessage.CmdType cmdType, SocksMessage.AddressType addressType, String host, int port) {
-        logger.debug("Testing cmdType: " + cmdType + " addressType: " + addressType + " host: " + host + " port: " + port);
+    private static void testSocksCmdRequestDecoderWithDifferentParams(SocksCmdType cmdType,
+                                                                      SocksAddressType addressType,
+                                                                      String host,
+                                                                      int port) {
+        logger.debug("Testing cmdType: " + cmdType + " addressType: " + addressType + " host: " + host +
+                " port: " + port);
         SocksCmdRequest msg = new SocksCmdRequest(cmdType, addressType, host, port);
         SocksCmdRequestDecoder decoder = new SocksCmdRequestDecoder();
-        EmbeddedByteChannel embedder = new EmbeddedByteChannel(decoder);
+        EmbeddedChannel embedder = new EmbeddedChannel(decoder);
         SocksCommonTestUtils.writeMessageIntoEmbedder(embedder, msg);
-        if (msg.addressType() == SocksMessage.AddressType.UNKNOWN) {
+        if (msg.addressType() == SocksAddressType.UNKNOWN) {
             assertTrue(embedder.readInbound() instanceof UnknownSocksRequest);
         } else {
-            msg = (SocksCmdRequest) embedder.readInbound();
+            msg = embedder.readInbound();
             assertSame(msg.cmdType(), cmdType);
             assertSame(msg.addressType(), addressType);
             assertEquals(msg.host(), host);
@@ -46,25 +52,25 @@ public class SocksCmdRequestDecoderTest {
 
     @Test
     public void testCmdRequestDecoderIPv4() {
-        String[] hosts = {"127.0.0.1",};
-        int[] ports = {0, 32769, 65535 };
-        for (SocksMessage.CmdType cmdType : SocksMessage.CmdType.values()) {
+        String[] hosts = {"127.0.0.1", };
+        int[] ports = {1, 32769, 65535 };
+        for (SocksCmdType cmdType : SocksCmdType.values()) {
             for (String host : hosts) {
                 for (int port : ports) {
-                    testSocksCmdRequestDecoderWithDifferentParams(cmdType, SocksMessage.AddressType.IPv4, host, port);
+                    testSocksCmdRequestDecoderWithDifferentParams(cmdType, SocksAddressType.IPv4, host, port);
                 }
             }
         }
     }
 
     @Test
-    public void testCmdRequestDecoderIPv6() {
-        String[] hosts = {SocksCommonUtils.ipv6toStr(IPAddressUtil.textToNumericFormatV6("::1"))};
-        int[] ports = {0, 32769, 65535};
-        for (SocksMessage.CmdType cmdType : SocksMessage.CmdType.values()) {
+    public void testCmdRequestDecoderIPv6() throws UnknownHostException {
+        String[] hosts = {SocksCommonUtils.ipv6toStr(SocketUtils.addressByName("::1").getAddress())};
+        int[] ports = {1, 32769, 65535};
+        for (SocksCmdType cmdType : SocksCmdType.values()) {
             for (String host : hosts) {
                 for (int port : ports) {
-                    testSocksCmdRequestDecoderWithDifferentParams(cmdType, SocksMessage.AddressType.IPv6, host, port);
+                    testSocksCmdRequestDecoderWithDifferentParams(cmdType, SocksAddressType.IPv6, host, port);
                 }
             }
         }
@@ -84,11 +90,11 @@ public class SocksCmdRequestDecoderTest {
                           "例え.テスト",
                           "실례.테스트",
                           "உதாரணம்.பரிட்சை"};
-        int[] ports = {0, 32769, 65535};
-        for (SocksMessage.CmdType cmdType : SocksMessage.CmdType.values()) {
+        int[] ports = {1, 32769, 65535};
+        for (SocksCmdType cmdType : SocksCmdType.values()) {
             for (String host : hosts) {
                 for (int port : ports) {
-                    testSocksCmdRequestDecoderWithDifferentParams(cmdType, SocksMessage.AddressType.DOMAIN, host, port);
+                    testSocksCmdRequestDecoderWithDifferentParams(cmdType, SocksAddressType.DOMAIN, host, port);
                 }
             }
         }
@@ -98,8 +104,8 @@ public class SocksCmdRequestDecoderTest {
     public void testCmdRequestDecoderUnknown() {
         String host = "google.com";
         int port = 80;
-        for (SocksMessage.CmdType cmdType : SocksMessage.CmdType.values()) {
-            testSocksCmdRequestDecoderWithDifferentParams(cmdType, SocksMessage.AddressType.UNKNOWN, host, port);
+        for (SocksCmdType cmdType : SocksCmdType.values()) {
+            testSocksCmdRequestDecoderWithDifferentParams(cmdType, SocksAddressType.UNKNOWN, host, port);
         }
     }
 }

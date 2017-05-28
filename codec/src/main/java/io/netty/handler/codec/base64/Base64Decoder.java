@@ -24,6 +24,8 @@ import io.netty.handler.codec.DelimiterBasedFrameDecoder;
 import io.netty.handler.codec.Delimiters;
 import io.netty.handler.codec.MessageToMessageDecoder;
 
+import java.util.List;
+
 /**
  * Decodes a Base64-encoded {@link ByteBuf} or US-ASCII {@link String}
  * into a {@link ByteBuf}.  Please note that this decoder must be used
@@ -40,8 +42,6 @@ import io.netty.handler.codec.MessageToMessageDecoder;
  * // Encoder
  * pipeline.addLast("base64Encoder", new {@link Base64Encoder}());
  * </pre>
- * @apiviz.landmark
- * @apiviz.uses io.netty.handler.codec.base64.Base64
  */
 @Sharable
 public class Base64Decoder extends MessageToMessageDecoder<ByteBuf> {
@@ -53,8 +53,6 @@ public class Base64Decoder extends MessageToMessageDecoder<ByteBuf> {
     }
 
     public Base64Decoder(Base64Dialect dialect) {
-        super(ByteBuf.class);
-
         if (dialect == null) {
             throw new NullPointerException("dialect");
         }
@@ -62,7 +60,7 @@ public class Base64Decoder extends MessageToMessageDecoder<ByteBuf> {
     }
 
     @Override
-    protected Object decode(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
-        return Base64.decode(msg, msg.readerIndex(), msg.readableBytes(), dialect);
+    protected void decode(ChannelHandlerContext ctx, ByteBuf msg, List<Object> out) throws Exception {
+        out.add(Base64.decode(msg, msg.readerIndex(), msg.readableBytes(), dialect));
     }
 }

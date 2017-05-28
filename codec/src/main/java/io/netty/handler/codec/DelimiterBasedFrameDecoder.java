@@ -18,6 +18,8 @@ package io.netty.handler.codec;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 
+import java.util.List;
+
 /**
  * A decoder that splits the received {@link ByteBuf}s by one or more
  * delimiters.  It is particularly useful for decoding the frames which ends
@@ -52,7 +54,6 @@ import io.netty.channel.ChannelHandlerContext;
  * | ABC\nDEF |
  * +----------+
  * </pre>
- * @apiviz.uses io.netty.handler.codec.Delimiters - - useful
  */
 public class DelimiterBasedFrameDecoder extends ByteToMessageDecoder {
 
@@ -211,6 +212,21 @@ public class DelimiterBasedFrameDecoder extends ByteToMessageDecoder {
     }
 
     @Override
+    protected final void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+        Object decoded = decode(ctx, in);
+        if (decoded != null) {
+            out.add(decoded);
+        }
+    }
+
+    /**
+     * Create a frame out of the {@link ByteBuf} and return it.
+     *
+     * @param   ctx             the {@link ChannelHandlerContext} which this {@link ByteToMessageDecoder} belongs to
+     * @param   buffer          the {@link ByteBuf} from which to read data
+     * @return  frame           the {@link ByteBuf} which represent the frame or {@code null} if no frame could
+     *                          be created.
+     */
     protected Object decode(ChannelHandlerContext ctx, ByteBuf buffer) throws Exception {
         if (lineBasedDecoder != null) {
             return lineBasedDecoder.decode(ctx, buffer);
@@ -239,7 +255,7 @@ public class DelimiterBasedFrameDecoder extends ByteToMessageDecoder {
                 int tooLongFrameLength = this.tooLongFrameLength;
                 this.tooLongFrameLength = 0;
                 if (!failFast) {
-                    fail(ctx, tooLongFrameLength);
+                    fail(tooLongFrameLength);
                 }
                 return null;
             }
@@ -247,15 +263,15 @@ public class DelimiterBasedFrameDecoder extends ByteToMessageDecoder {
             if (minFrameLength > maxFrameLength) {
                 // Discard read frame.
                 buffer.skipBytes(minFrameLength + minDelimLength);
-                fail(ctx, minFrameLength);
+                fail(minFrameLength);
                 return null;
             }
 
             if (stripDelimiter) {
-                frame = buffer.readBytes(minFrameLength);
+                frame = buffer.readRetainedSlice(minFrameLength);
                 buffer.skipBytes(minDelimLength);
             } else {
-                frame = buffer.readBytes(minFrameLength + minDelimLength);
+                frame = buffer.readRetainedSlice(minFrameLength + minDelimLength);
             }
 
             return frame;
@@ -267,7 +283,7 @@ public class DelimiterBasedFrameDecoder extends ByteToMessageDecoder {
                     buffer.skipBytes(buffer.readableBytes());
                     discardingTooLongFrame = true;
                     if (failFast) {
-                        fail(ctx, tooLongFrameLength);
+                        fail(tooLongFrameLength);
                     }
                 }
             } else {
@@ -279,17 +295,15 @@ public class DelimiterBasedFrameDecoder extends ByteToMessageDecoder {
         }
     }
 
-    private void fail(ChannelHandlerContext ctx, long frameLength) {
+    private void fail(long frameLength) {
         if (frameLength > 0) {
-            ctx.fireExceptionCaught(
-                    new TooLongFrameException(
+            throw new TooLongFrameException(
                             "frame length exceeds " + maxFrameLength +
-                            ": " + frameLength + " - discarded"));
+                            ": " + frameLength + " - discarded");
         } else {
-            ctx.fireExceptionCaught(
-                    new TooLongFrameException(
+            throw new TooLongFrameException(
                             "frame length exceeds " + maxFrameLength +
-                            " - discarding"));
+                            " - discarding");
         }
     }
 

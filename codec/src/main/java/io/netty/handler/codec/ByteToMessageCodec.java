@@ -16,95 +16,160 @@
 package io.netty.handler.codec;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.MessageBuf;
-import io.netty.channel.ChannelHandlerAdapter;
+import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelHandlerUtil;
-import io.netty.channel.ChannelInboundByteHandler;
-import io.netty.channel.ChannelOutboundMessageHandler;
 import io.netty.channel.ChannelPromise;
+import io.netty.util.internal.TypeParameterMatcher;
 
-public abstract class ByteToMessageCodec<I> extends ChannelHandlerAdapter
-        implements ChannelInboundByteHandler, ChannelOutboundMessageHandler<I> {
+import java.util.List;
 
-    private final Class<?>[] encodableMessageTypes;
+/**
+ * A Codec for on-the-fly encoding/decoding of bytes to messages and vise-versa.
+ *
+ * This can be thought of as a combination of {@link ByteToMessageDecoder} and {@link MessageToByteEncoder}.
+ *
+ * Be aware that sub-classes of {@link ByteToMessageCodec} <strong>MUST NOT</strong>
+ * annotated with {@link @Sharable}.
+ */
+public abstract class ByteToMessageCodec<I> extends ChannelDuplexHandler {
+
+    private final TypeParameterMatcher outboundMsgMatcher;
     private final MessageToByteEncoder<I> encoder;
-    private final ByteToMessageDecoder decoder;
 
-    protected ByteToMessageCodec(Class<?>... encodableMessageTypes) {
-        this.encodableMessageTypes = encodableMessageTypes;
-        encoder = new MessageToByteEncoder<I>() {
-            @Override
-            public boolean isEncodable(Object msg) throws Exception {
-                return ByteToMessageCodec.this.isEncodable(msg);
-            }
+    private final ByteToMessageDecoder decoder = new ByteToMessageDecoder() {
+        @Override
+        public void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+            ByteToMessageCodec.this.decode(ctx, in, out);
+        }
 
-            @Override
-            protected void encode(ChannelHandlerContext ctx, I msg, ByteBuf out) throws Exception {
-                ByteToMessageCodec.this.encode(ctx, msg, out);
-            }
-        };
+        @Override
+        protected void decodeLast(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+            ByteToMessageCodec.this.decodeLast(ctx, in, out);
+        }
+    };
 
-        decoder = new ByteToMessageDecoder() {
-            @Override
-            public Object decode(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
-                return ByteToMessageCodec.this.decode(ctx, in);
-            }
+    /**
+     * see {@link #ByteToMessageCodec(boolean)} with {@code true} as boolean parameter.
+     */
+    protected ByteToMessageCodec() {
+        this(true);
+    }
 
-            @Override
-            protected Object decodeLast(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
-                return ByteToMessageCodec.this.decodeLast(ctx, in);
-            }
-        };
+    /**
+     * see {@link #ByteToMessageCodec(Class, boolean)} with {@code true} as boolean value.
+     */
+    protected ByteToMessageCodec(Class<? extends I> outboundMessageType) {
+        this(outboundMessageType, true);
+    }
+
+    /**
+     * Create a new instance which will try to detect the types to match out of the type parameter of the class.
+     *
+     * @param preferDirect          {@code true} if a direct {@link ByteBuf} should be tried to be used as target for
+     *                              the encoded messages. If {@code false} is used it will allocate a heap
+     *                              {@link ByteBuf}, which is backed by an byte array.
+     */
+    protected ByteToMessageCodec(boolean preferDirect) {
+        ensureNotSharable();
+        outboundMsgMatcher = TypeParameterMatcher.find(this, ByteToMessageCodec.class, "I");
+        encoder = new Encoder(preferDirect);
+    }
+
+    /**
+     * Create a new instance
+     *
+     * @param outboundMessageType   The type of messages to match
+     * @param preferDirect          {@code true} if a direct {@link ByteBuf} should be tried to be used as target for
+     *                              the encoded messages. If {@code false} is used it will allocate a heap
+     *                              {@link ByteBuf}, which is backed by an byte array.
+     */
+    protected ByteToMessageCodec(Class<? extends I> outboundMessageType, boolean preferDirect) {
+        ensureNotSharable();
+        outboundMsgMatcher = TypeParameterMatcher.get(outboundMessageType);
+        encoder = new Encoder(preferDirect);
+    }
+
+    /**
+     * Returns {@code true} if and only if the specified message can be encoded by this codec.
+     *
+     * @param msg the message
+     */
+    public boolean acceptOutboundMessage(Object msg) throws Exception {
+        return outboundMsgMatcher.match(msg);
     }
 
     @Override
-    public void beforeAdd(ChannelHandlerContext ctx) throws Exception {
-        decoder.beforeAdd(ctx);
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        decoder.channelRead(ctx, msg);
     }
 
     @Override
-    public ByteBuf newInboundBuffer(ChannelHandlerContext ctx) throws Exception {
-        return decoder.newInboundBuffer(ctx);
+    public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+        encoder.write(ctx, msg, promise);
     }
 
     @Override
-    public void discardInboundReadBytes(ChannelHandlerContext ctx) throws Exception {
-        decoder.discardInboundReadBytes(ctx);
+    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
+        decoder.channelReadComplete(ctx);
     }
 
     @Override
-    public void freeInboundBuffer(ChannelHandlerContext ctx) throws Exception {
-        decoder.freeInboundBuffer(ctx);
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        decoder.channelInactive(ctx);
     }
 
     @Override
-    public MessageBuf<I> newOutboundBuffer(ChannelHandlerContext ctx) throws Exception {
-        return encoder.newOutboundBuffer(ctx);
+    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+        try {
+            decoder.handlerAdded(ctx);
+        } finally {
+            encoder.handlerAdded(ctx);
+        }
     }
 
     @Override
-    public void freeOutboundBuffer(ChannelHandlerContext ctx) throws Exception {
-        encoder.freeOutboundBuffer(ctx);
+    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+        try {
+            decoder.handlerRemoved(ctx);
+        } finally {
+            encoder.handlerRemoved(ctx);
+        }
     }
 
-    @Override
-    public void inboundBufferUpdated(ChannelHandlerContext ctx) throws Exception {
-        decoder.inboundBufferUpdated(ctx);
-    }
-
-    @Override
-    public void flush(ChannelHandlerContext ctx, ChannelPromise promise) throws Exception {
-        encoder.flush(ctx, promise);
-    }
-
-    public boolean isEncodable(Object msg) throws Exception {
-        return ChannelHandlerUtil.acceptMessage(encodableMessageTypes, msg);
-    }
-
+    /**
+     * @see MessageToByteEncoder#encode(ChannelHandlerContext, Object, ByteBuf)
+     */
     protected abstract void encode(ChannelHandlerContext ctx, I msg, ByteBuf out) throws Exception;
-    protected abstract Object decode(ChannelHandlerContext ctx, ByteBuf in) throws Exception;
-    protected Object decodeLast(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
-        return decode(ctx, in);
+
+    /**
+     * @see ByteToMessageDecoder#decode(ChannelHandlerContext, ByteBuf, List)
+     */
+    protected abstract void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception;
+
+    /**
+     * @see ByteToMessageDecoder#decodeLast(ChannelHandlerContext, ByteBuf, List)
+     */
+    protected void decodeLast(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+        if (in.isReadable()) {
+            // Only call decode() if there is something left in the buffer to decode.
+            // See https://github.com/netty/netty/issues/4386
+            decode(ctx, in, out);
+        }
+    }
+
+    private final class Encoder extends MessageToByteEncoder<I> {
+        Encoder(boolean preferDirect) {
+            super(preferDirect);
+        }
+
+        @Override
+        public boolean acceptOutboundMessage(Object msg) throws Exception {
+            return ByteToMessageCodec.this.acceptOutboundMessage(msg);
+        }
+
+        @Override
+        protected void encode(ChannelHandlerContext ctx, I msg, ByteBuf out) throws Exception {
+            ByteToMessageCodec.this.encode(ctx, msg, out);
+        }
     }
 }

@@ -15,13 +15,13 @@
  */
 package io.netty.handler.codec.http;
 
-import io.netty.util.internal.StringUtil;
+import static io.netty.util.internal.ObjectUtil.checkNotNull;
 
 /**
  * The default {@link HttpRequest} implementation.
  */
 public class DefaultHttpRequest extends DefaultHttpMessage implements HttpRequest {
-
+    private static final int HASH_CODE_PRIME = 31;
     private HttpMethod method;
     private String uri;
 
@@ -29,39 +29,77 @@ public class DefaultHttpRequest extends DefaultHttpMessage implements HttpReques
      * Creates a new instance.
      *
      * @param httpVersion the HTTP version of the request
-     * @param method      the HTTP getMethod of the request
+     * @param method      the HTTP method of the request
      * @param uri         the URI or path of the request
      */
     public DefaultHttpRequest(HttpVersion httpVersion, HttpMethod method, String uri) {
-        super(httpVersion);
-        if (method == null) {
-            throw new NullPointerException("getMethod");
-        }
-        if (uri == null) {
-            throw new NullPointerException("getUri");
-        }
-        this.method = method;
-        this.uri = uri;
+        this(httpVersion, method, uri, true);
+    }
+
+    /**
+     * Creates a new instance.
+     *
+     * @param httpVersion       the HTTP version of the request
+     * @param method            the HTTP method of the request
+     * @param uri               the URI or path of the request
+     * @param validateHeaders   validate the header names and values when adding them to the {@link HttpHeaders}
+     */
+    public DefaultHttpRequest(HttpVersion httpVersion, HttpMethod method, String uri, boolean validateHeaders) {
+        super(httpVersion, validateHeaders, false);
+        this.method = checkNotNull(method, "method");
+        this.uri = checkNotNull(uri, "uri");
+    }
+
+    /**
+     * Creates a new instance.
+     *
+     * @param httpVersion       the HTTP version of the request
+     * @param method            the HTTP method of the request
+     * @param uri               the URI or path of the request
+     * @param headers           the Headers for this Request
+     */
+    public DefaultHttpRequest(HttpVersion httpVersion, HttpMethod method, String uri, HttpHeaders headers) {
+        super(httpVersion, headers);
+        this.method = checkNotNull(method, "method");
+        this.uri = checkNotNull(uri, "uri");
     }
 
     @Override
+    @Deprecated
     public HttpMethod getMethod() {
+        return method();
+    }
+
+    @Override
+    public HttpMethod method() {
         return method;
     }
 
     @Override
+    @Deprecated
     public String getUri() {
+        return uri();
+    }
+
+    @Override
+    public String uri() {
         return uri;
     }
 
     @Override
     public HttpRequest setMethod(HttpMethod method) {
+        if (method == null) {
+            throw new NullPointerException("method");
+        }
         this.method = method;
         return this;
     }
 
     @Override
     public HttpRequest setUri(String uri) {
+        if (uri == null) {
+            throw new NullPointerException("uri");
+        }
         this.uri = uri;
         return this;
     }
@@ -73,23 +111,29 @@ public class DefaultHttpRequest extends DefaultHttpMessage implements HttpReques
     }
 
     @Override
-    public String toString() {
-        StringBuilder buf = new StringBuilder();
-        buf.append(getClass().getSimpleName());
-        buf.append(", decodeResult: ");
-        buf.append(getDecoderResult());
-        buf.append(')');
-        buf.append(StringUtil.NEWLINE);
-        buf.append(getMethod().toString());
-        buf.append(' ');
-        buf.append(getUri());
-        buf.append(' ');
-        buf.append(getProtocolVersion().text());
-        buf.append(StringUtil.NEWLINE);
-        appendHeaders(buf);
+    public int hashCode() {
+        int result = 1;
+        result = HASH_CODE_PRIME * result + method.hashCode();
+        result = HASH_CODE_PRIME * result + uri.hashCode();
+        result = HASH_CODE_PRIME * result + super.hashCode();
+        return result;
+    }
 
-        // Remove the last newline.
-        buf.setLength(buf.length() - StringUtil.NEWLINE.length());
-        return buf.toString();
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof DefaultHttpRequest)) {
+            return false;
+        }
+
+        DefaultHttpRequest other = (DefaultHttpRequest) o;
+
+        return method().equals(other.method()) &&
+               uri().equalsIgnoreCase(other.uri()) &&
+               super.equals(o);
+    }
+
+    @Override
+    public String toString() {
+        return HttpMessageUtil.appendRequest(new StringBuilder(256), this).toString();
     }
 }

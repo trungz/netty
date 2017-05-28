@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2015 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -15,7 +15,9 @@
  */
 package io.netty.handler.codec.protobuf;
 
-import static io.netty.buffer.Unpooled.*;
+import com.google.protobuf.Message;
+import com.google.protobuf.MessageLite;
+import com.google.protobuf.MessageLiteOrBuilder;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
@@ -24,11 +26,12 @@ import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import io.netty.handler.codec.LengthFieldPrepender;
 import io.netty.handler.codec.MessageToMessageEncoder;
 
-import com.google.protobuf.Message;
-import com.google.protobuf.MessageLite;
+import java.util.List;
+
+import static io.netty.buffer.Unpooled.*;
 
 /**
- * Encodes the requested <a href="http://code.google.com/p/protobuf/">Google
+ * Encodes the requested <a href="https://github.com/google/protobuf">Google
  * Protocol Buffers</a> {@link Message} and {@link MessageLite} into a
  * {@link ByteBuf}. A typical setup for TCP/IP would be:
  * <pre>
@@ -47,29 +50,25 @@ import com.google.protobuf.MessageLite;
  * and then you can use a {@code MyMessage} instead of a {@link ByteBuf}
  * as a message:
  * <pre>
- * void messageReceived({@link ChannelHandlerContext} ctx, MyMessage req) {
+ * void channelRead({@link ChannelHandlerContext} ctx, Object msg) {
+ *     MyMessage req = (MyMessage) msg;
  *     MyMessage res = MyMessage.newBuilder().setText(
  *                               "Did you say '" + req.getText() + "'?").build();
  *     ch.write(res);
  * }
  * </pre>
- * @apiviz.landmark
  */
 @Sharable
-public class ProtobufEncoder extends MessageToMessageEncoder<Object> {
-
-    public ProtobufEncoder() {
-        super(MessageLite.class, MessageLite.Builder.class);
-    }
-
+public class ProtobufEncoder extends MessageToMessageEncoder<MessageLiteOrBuilder> {
     @Override
-    protected Object encode(ChannelHandlerContext ctx, Object msg) throws Exception {
+    protected void encode(ChannelHandlerContext ctx, MessageLiteOrBuilder msg, List<Object> out)
+            throws Exception {
         if (msg instanceof MessageLite) {
-            return wrappedBuffer(((MessageLite) msg).toByteArray());
+            out.add(wrappedBuffer(((MessageLite) msg).toByteArray()));
+            return;
         }
         if (msg instanceof MessageLite.Builder) {
-            return wrappedBuffer(((MessageLite.Builder) msg).build().toByteArray());
+            out.add(wrappedBuffer(((MessageLite.Builder) msg).build().toByteArray()));
         }
-        return null;
     }
 }

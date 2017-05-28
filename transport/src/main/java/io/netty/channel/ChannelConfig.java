@@ -46,24 +46,21 @@ import java.util.Map;
  * <tr>
  * <th>Name</th><th>Associated setter method</th>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#CONNECT_TIMEOUT_MILLIS}</td><td>{@link #setConnectTimeoutMillis(int)}</td>
+ * <td>{@link ChannelOption#CONNECT_TIMEOUT_MILLIS}</td><td>{@link #setConnectTimeoutMillis(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#WRITE_SPIN_COUNT}</td><td>{@link #setWriteSpinCount(int)}</td>
+ * <td>{@link ChannelOption#WRITE_SPIN_COUNT}</td><td>{@link #setWriteSpinCount(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#ALLOCATOR}</td><td>{@link #setAllocator(ByteBufAllocator)}</td>
+ * <td>{@link ChannelOption#WRITE_BUFFER_WATER_MARK}</td><td>{@link #setWriteBufferWaterMark(WriteBufferWaterMark)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#AUTO_READ}</td><td>{@link #setAutoRead(boolean)}</td>
+ * <td>{@link ChannelOption#ALLOCATOR}</td><td>{@link #setAllocator(ByteBufAllocator)}</td>
+ * </tr><tr>
+ * <td>{@link ChannelOption#AUTO_READ}</td><td>{@link #setAutoRead(boolean)}</td>
  * </tr>
  * </table>
  * <p>
  * More options are available in the sub-types of {@link ChannelConfig}.  For
  * example, you can configure the parameters which are specific to a TCP/IP
  * socket as explained in {@link SocketChannelConfig}.
- *
- * @apiviz.has io.netty.channel.ChannelPipelineFactory
- * @apiviz.composedOf io.netty.channel.ReceiveBufferSizePredictor
- *
- * @apiviz.excludeSubtypes
  */
 public interface ChannelConfig {
 
@@ -124,6 +121,25 @@ public interface ChannelConfig {
     ChannelConfig setConnectTimeoutMillis(int connectTimeoutMillis);
 
     /**
+     * @deprecated Use {@link MaxMessagesRecvByteBufAllocator}
+     * <p>
+     * Returns the maximum number of messages to read per read loop.
+     * a {@link ChannelInboundHandler#channelRead(ChannelHandlerContext, Object) channelRead()} event.
+     * If this value is greater than 1, an event loop might attempt to read multiple times to procure multiple messages.
+     */
+    @Deprecated
+    int getMaxMessagesPerRead();
+
+    /**
+     * @deprecated Use {@link MaxMessagesRecvByteBufAllocator}
+     * <p>
+     * Sets the maximum number of messages to read per read loop.
+     * If this value is greater than 1, an event loop might attempt to read multiple times to procure multiple messages.
+     */
+    @Deprecated
+    ChannelConfig setMaxMessagesPerRead(int maxMessagesPerRead);
+
+    /**
      * Returns the maximum loop count for a write operation until
      * {@link WritableByteChannel#write(ByteBuffer)} returns a non-zero value.
      * It is similar to what a spin lock is used for in concurrency programming.
@@ -157,6 +173,16 @@ public interface ChannelConfig {
     ChannelConfig setAllocator(ByteBufAllocator allocator);
 
     /**
+     * Returns {@link RecvByteBufAllocator} which is used for the channel to allocate receive buffers.
+     */
+    <T extends RecvByteBufAllocator> T getRecvByteBufAllocator();
+
+    /**
+     * Set the {@link RecvByteBufAllocator} which is used for the channel to allocate receive buffers.
+     */
+    ChannelConfig setRecvByteBufAllocator(RecvByteBufAllocator allocator);
+
+    /**
      * Returns {@code true} if and only if {@link ChannelHandlerContext#read()} will be invoked automatically so that
      * a user application doesn't need to call it at all. The default value is {@code true}.
      */
@@ -167,4 +193,80 @@ public interface ChannelConfig {
      * need to call it at all. The default value is {@code true}.
      */
     ChannelConfig setAutoRead(boolean autoRead);
+
+    /**
+     * @deprecated  Auto close will be removed in a future release.
+     *
+     * Returns {@code true} if and only if the {@link Channel} will be closed automatically and immediately on
+     * write failure.  The default is {@code false}.
+     */
+    @Deprecated
+    boolean isAutoClose();
+
+    /**
+     * @deprecated  Auto close will be removed in a future release.
+     *
+     * Sets whether the {@link Channel} should be closed automatically and immediately on write failure.
+     * The default is {@code false}.
+     */
+    @Deprecated
+    ChannelConfig setAutoClose(boolean autoClose);
+
+    /**
+     * Returns the high water mark of the write buffer.  If the number of bytes
+     * queued in the write buffer exceeds this value, {@link Channel#isWritable()}
+     * will start to return {@code false}.
+     */
+    int getWriteBufferHighWaterMark();
+
+    /**
+     * <p>
+     * Sets the high water mark of the write buffer.  If the number of bytes
+     * queued in the write buffer exceeds this value, {@link Channel#isWritable()}
+     * will start to return {@code false}.
+     */
+    ChannelConfig setWriteBufferHighWaterMark(int writeBufferHighWaterMark);
+
+    /**
+     * Returns the low water mark of the write buffer.  Once the number of bytes
+     * queued in the write buffer exceeded the
+     * {@linkplain #setWriteBufferHighWaterMark(int) high water mark} and then
+     * dropped down below this value, {@link Channel#isWritable()} will start to return
+     * {@code true} again.
+     */
+    int getWriteBufferLowWaterMark();
+
+    /**
+     * <p>
+     * Sets the low water mark of the write buffer.  Once the number of bytes
+     * queued in the write buffer exceeded the
+     * {@linkplain #setWriteBufferHighWaterMark(int) high water mark} and then
+     * dropped down below this value, {@link Channel#isWritable()} will start to return
+     * {@code true} again.
+     */
+    ChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark);
+
+    /**
+     * Returns {@link MessageSizeEstimator} which is used for the channel
+     * to detect the size of a message.
+     */
+    MessageSizeEstimator getMessageSizeEstimator();
+
+    /**
+     * Set the {@link MessageSizeEstimator} which is used for the channel
+     * to detect the size of a message.
+     */
+    ChannelConfig setMessageSizeEstimator(MessageSizeEstimator estimator);
+
+    /**
+     * Returns the {@link WriteBufferWaterMark} which is used for setting the high and low
+     * water mark of the write buffer.
+     */
+    WriteBufferWaterMark getWriteBufferWaterMark();
+
+    /**
+     * Set the {@link WriteBufferWaterMark} which is used for setting the high and low
+     * water mark of the write buffer.
+     */
+    ChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark);
 }

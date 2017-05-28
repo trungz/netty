@@ -18,21 +18,30 @@ package io.netty.channel.embedded;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelPromise;
+import io.netty.channel.DefaultChannelPromise;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
+import io.netty.util.concurrent.AbstractScheduledEventExecutor;
+import io.netty.util.concurrent.Future;
+import io.netty.util.internal.ObjectUtil;
 
 import java.util.ArrayDeque;
-import java.util.Collections;
-import java.util.List;
 import java.util.Queue;
-import java.util.concurrent.AbstractExecutorService;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-final class EmbeddedEventLoop extends AbstractExecutorService implements EventLoop {
+final class EmbeddedEventLoop extends AbstractScheduledEventExecutor implements EventLoop {
 
     private final Queue<Runnable> tasks = new ArrayDeque<Runnable>(2);
+
+    @Override
+    public EventLoopGroup parent() {
+        return (EventLoopGroup) super.parent();
+    }
+
+    @Override
+    public EventLoop next() {
+        return (EventLoop) super.next();
+    }
 
     @Override
     public void execute(Runnable command) {
@@ -53,38 +62,46 @@ final class EmbeddedEventLoop extends AbstractExecutorService implements EventLo
         }
     }
 
+    long runScheduledTasks() {
+        long time = AbstractScheduledEventExecutor.nanoTime();
+        for (;;) {
+            Runnable task = pollScheduledTask(time);
+            if (task == null) {
+                return nextScheduledTaskNano();
+            }
+
+            task.run();
+        }
+    }
+
+    long nextScheduledTask() {
+        return nextScheduledTaskNano();
+    }
+
     @Override
-    public ScheduledFuture<?> schedule(Runnable command, long delay,
-            TimeUnit unit) {
+    protected void cancelScheduledTasks() {
+        super.cancelScheduledTasks();
+    }
+
+    @Override
+    public Future<?> shutdownGracefully(long quietPeriod, long timeout, TimeUnit unit) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public <V> ScheduledFuture<V> schedule(Callable<V> callable, long delay,
-            TimeUnit unit) {
+    public Future<?> terminationFuture() {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public ScheduledFuture<?> scheduleAtFixedRate(Runnable command,
-            long initialDelay, long period, TimeUnit unit) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command,
-            long initialDelay, long delay, TimeUnit unit) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
+    @Deprecated
     public void shutdown() {
-        // NOOP
+        throw new UnsupportedOperationException();
     }
 
     @Override
-    public List<Runnable> shutdownNow() {
-        return Collections.emptyList();
+    public boolean isShuttingDown() {
+        return false;
     }
 
     @Override
@@ -98,17 +115,23 @@ final class EmbeddedEventLoop extends AbstractExecutorService implements EventLo
     }
 
     @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit)
-            throws InterruptedException {
-        Thread.sleep(unit.toMillis(timeout));
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
         return false;
     }
 
     @Override
     public ChannelFuture register(Channel channel) {
-        return register(channel, channel.newPromise());
+        return register(new DefaultChannelPromise(channel, this));
     }
 
+    @Override
+    public ChannelFuture register(ChannelPromise promise) {
+        ObjectUtil.checkNotNull(promise, "promise");
+        promise.channel().unsafe().register(this, promise);
+        return promise;
+    }
+
+    @Deprecated
     @Override
     public ChannelFuture register(Channel channel, ChannelPromise promise) {
         channel.unsafe().register(this, promise);
@@ -123,15 +146,5 @@ final class EmbeddedEventLoop extends AbstractExecutorService implements EventLo
     @Override
     public boolean inEventLoop(Thread thread) {
         return true;
-    }
-
-    @Override
-    public EventLoop next() {
-        return this;
-    }
-
-    @Override
-    public EventLoopGroup parent() {
-        return this;
     }
 }

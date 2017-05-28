@@ -18,13 +18,12 @@ package io.netty.handler.codec.http.websocketx;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.util.CharsetUtil;
+import io.netty.util.internal.EmptyArrays;
 
 /**
  * Web Socket Frame for closing the connection
  */
 public class CloseWebSocketFrame extends WebSocketFrame {
-
-    private static final byte[] EMTPY_REASON = new byte[0];
 
     /**
      * Creates a new empty close frame.
@@ -55,7 +54,7 @@ public class CloseWebSocketFrame extends WebSocketFrame {
      *            reserved bits used for protocol extensions
      */
     public CloseWebSocketFrame(boolean finalFragment, int rsv) {
-        this(finalFragment, rsv, null);
+        this(finalFragment, rsv, Unpooled.buffer(0));
     }
 
     /**
@@ -76,7 +75,7 @@ public class CloseWebSocketFrame extends WebSocketFrame {
     }
 
     private static ByteBuf newBinaryData(int statusCode, String reasonText) {
-        byte[] reasonBytes = EMTPY_REASON;
+        byte[] reasonBytes = EmptyArrays.EMPTY_BYTES;
         if (reasonText != null) {
             reasonBytes = reasonText.getBytes(CharsetUtil.UTF_8);
         }
@@ -110,7 +109,7 @@ public class CloseWebSocketFrame extends WebSocketFrame {
      * a getStatus code is set, -1 is returned.
      */
     public int statusCode() {
-        ByteBuf binaryData = data();
+        ByteBuf binaryData = content();
         if (binaryData == null || binaryData.capacity() == 0) {
             return -1;
         }
@@ -127,7 +126,7 @@ public class CloseWebSocketFrame extends WebSocketFrame {
      * text is not supplied, an empty string is returned.
      */
     public String reasonText() {
-        ByteBuf binaryData = data();
+        ByteBuf binaryData = content();
         if (binaryData == null || binaryData.capacity() <= 2) {
             return "";
         }
@@ -141,6 +140,45 @@ public class CloseWebSocketFrame extends WebSocketFrame {
 
     @Override
     public CloseWebSocketFrame copy() {
-        return new CloseWebSocketFrame(isFinalFragment(), rsv(), data().copy());
+        return (CloseWebSocketFrame) super.copy();
+    }
+
+    @Override
+    public CloseWebSocketFrame duplicate() {
+        return (CloseWebSocketFrame) super.duplicate();
+    }
+
+    @Override
+    public CloseWebSocketFrame retainedDuplicate() {
+        return (CloseWebSocketFrame) super.retainedDuplicate();
+    }
+
+    @Override
+    public CloseWebSocketFrame replace(ByteBuf content) {
+        return new CloseWebSocketFrame(isFinalFragment(), rsv(), content);
+    }
+
+    @Override
+    public CloseWebSocketFrame retain() {
+        super.retain();
+        return this;
+    }
+
+    @Override
+    public CloseWebSocketFrame retain(int increment) {
+        super.retain(increment);
+        return this;
+    }
+
+    @Override
+    public CloseWebSocketFrame touch() {
+        super.touch();
+        return this;
+    }
+
+    @Override
+    public CloseWebSocketFrame touch(Object hint) {
+        super.touch(hint);
+        return this;
     }
 }

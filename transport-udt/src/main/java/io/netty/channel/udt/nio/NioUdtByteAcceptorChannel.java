@@ -15,45 +15,24 @@
  */
 package io.netty.channel.udt.nio;
 
-import io.netty.buffer.BufType;
-import io.netty.buffer.MessageBuf;
-import io.netty.channel.ChannelMetadata;
-import io.netty.logging.InternalLogger;
-import io.netty.logging.InternalLoggerFactory;
-
 import com.barchart.udt.TypeUDT;
 import com.barchart.udt.nio.SocketChannelUDT;
+import io.netty.channel.udt.UdtChannel;
 
 /**
  * Byte Channel Acceptor for UDT Streams.
+ *
+ * @deprecated The UDT transport is no longer maintained and will be removed.
  */
+@Deprecated
 public class NioUdtByteAcceptorChannel extends NioUdtAcceptorChannel {
-
-    private static final InternalLogger logger = InternalLoggerFactory
-            .getInstance(NioUdtByteAcceptorChannel.class);
-
-    private static final ChannelMetadata METADATA = new ChannelMetadata(
-            BufType.BYTE, false);
 
     public NioUdtByteAcceptorChannel() {
         super(TypeUDT.STREAM);
     }
 
     @Override
-    protected int doReadMessages(final MessageBuf<Object> buf) throws Exception {
-        final SocketChannelUDT channelUDT = javaChannel().accept();
-        if (channelUDT == null) {
-            return 0;
-        } else {
-            buf.add(new NioUdtByteConnectorChannel(this, channelUDT.socketUDT()
-                    .id(), channelUDT));
-            return 1;
-        }
+    protected UdtChannel newConnectorChannel(SocketChannelUDT channelUDT) {
+        return new NioUdtByteConnectorChannel(this, channelUDT);
     }
-
-    @Override
-    public ChannelMetadata metadata() {
-        return METADATA;
-    }
-
 }

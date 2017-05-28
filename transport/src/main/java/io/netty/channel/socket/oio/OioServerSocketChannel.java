@@ -15,14 +15,14 @@
  */
 package io.netty.channel.socket.oio;
 
-import io.netty.buffer.BufType;
-import io.netty.buffer.MessageBuf;
 import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelMetadata;
-import io.netty.channel.socket.ServerSocketChannel;
+import io.netty.channel.ChannelOutboundBuffer;
 import io.netty.channel.oio.AbstractOioMessageChannel;
-import io.netty.logging.InternalLogger;
-import io.netty.logging.InternalLoggerFactory;
+import io.netty.channel.socket.ServerSocketChannel;
+import io.netty.util.internal.SocketUtils;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -30,6 +30,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketAddress;
 import java.net.SocketTimeoutException;
+import java.util.List;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -44,7 +45,7 @@ public class OioServerSocketChannel extends AbstractOioMessageChannel
     private static final InternalLogger logger =
         InternalLoggerFactory.getInstance(OioServerSocketChannel.class);
 
-    private static final ChannelMetadata METADATA = new ChannelMetadata(BufType.MESSAGE, false);
+    private static final ChannelMetadata METADATA = new ChannelMetadata(false, 1);
 
     private static ServerSocket newServerSocket() {
         try {
@@ -71,17 +72,7 @@ public class OioServerSocketChannel extends AbstractOioMessageChannel
      * @param socket    the {@link ServerSocket} which is used by this instance
      */
     public OioServerSocketChannel(ServerSocket socket) {
-        this(null, socket);
-    }
-
-    /**
-     * Create a new instance from the given {@link ServerSocket}
-     *
-     * @param id        the id which should be used for this instance or {@code null} if a new one should be generated
-     * @param socket    the {@link ServerSocket} which is used by this instance
-     */
-    public OioServerSocketChannel(Integer id, ServerSocket socket) {
-        super(null, id);
+        super(null);
         if (socket == null) {
             throw new NullPointerException("socket");
         }
@@ -141,7 +132,7 @@ public class OioServerSocketChannel extends AbstractOioMessageChannel
 
     @Override
     protected SocketAddress localAddress0() {
-        return socket.getLocalSocketAddress();
+        return SocketUtils.localSocketAddress(socket);
     }
 
     @Override
@@ -155,32 +146,38 @@ public class OioServerSocketChannel extends AbstractOioMessageChannel
     }
 
     @Override
-    protected int doReadMessages(MessageBuf<Object> buf) throws Exception {
+    protected int doReadMessages(List<Object> buf) throws Exception {
         if (socket.isClosed()) {
             return -1;
         }
 
-        Socket s = null;
         try {
-            s = socket.accept();
-            if (s != null) {
-                buf.add(new OioSocketChannel(this, null, s));
+            Socket s = socket.accept();
+            try {
+                buf.add(new OioSocketChannel(this, s));
                 return 1;
-            }
-        } catch (SocketTimeoutException e) {
-            // Expected
-        } catch (Throwable t) {
-            logger.warn("Failed to create a new channel from an accepted socket.", t);
-            if (s != null) {
+            } catch (Throwable t) {
+                logger.warn("Failed to create a new channel from an accepted socket.", t);
                 try {
                     s.close();
                 } catch (Throwable t2) {
                     logger.warn("Failed to close a socket.", t2);
                 }
             }
+        } catch (SocketTimeoutException e) {
+            // Expected
         }
-
         return 0;
+    }
+
+    @Override
+    protected void doWrite(ChannelOutboundBuffer in) throws Exception {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    protected Object filterOutboundMessage(Object msg) throws Exception {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -199,8 +196,13 @@ public class OioServerSocketChannel extends AbstractOioMessageChannel
         throw new UnsupportedOperationException();
     }
 
+    @Deprecated
     @Override
-    protected void doWriteMessages(MessageBuf<Object> buf) throws Exception {
-        throw new UnsupportedOperationException();
+    protected void setReadPending(boolean readPending) {
+        super.setReadPending(readPending);
+    }
+
+    final void clearReadPending0() {
+        super.clearReadPending();
     }
 }

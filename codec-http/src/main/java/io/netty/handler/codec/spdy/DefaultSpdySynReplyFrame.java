@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2013 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -20,11 +20,8 @@ import io.netty.util.internal.StringUtil;
 /**
  * The default {@link SpdySynReplyFrame} implementation.
  */
-public class DefaultSpdySynReplyFrame extends DefaultSpdyHeaderBlock
+public class DefaultSpdySynReplyFrame extends DefaultSpdyHeadersFrame
         implements SpdySynReplyFrame {
-
-    private int streamId;
-    private boolean last;
 
     /**
      * Creates a new instance.
@@ -32,32 +29,28 @@ public class DefaultSpdySynReplyFrame extends DefaultSpdyHeaderBlock
      * @param streamId the Stream-ID of this frame
      */
     public DefaultSpdySynReplyFrame(int streamId) {
-        setStreamId(streamId);
+        super(streamId);
     }
 
-    @Override
-    public int getStreamId() {
-        return streamId;
+    /**
+     * Creates a new instance.
+     *
+     * @param streamId        the Stream-ID of this frame
+     * @param validateHeaders validate the header names and values when adding them to the {@link SpdyHeaders}
+     */
+    public DefaultSpdySynReplyFrame(int streamId, boolean validateHeaders) {
+        super(streamId, validateHeaders);
     }
 
     @Override
     public SpdySynReplyFrame setStreamId(int streamId) {
-        if (streamId <= 0) {
-            throw new IllegalArgumentException(
-                    "Stream-ID must be positive: " + streamId);
-        }
-        this.streamId = streamId;
+        super.setStreamId(streamId);
         return this;
     }
 
     @Override
-    public boolean isLast() {
-        return last;
-    }
-
-    @Override
     public SpdySynReplyFrame setLast(boolean last) {
-        this.last = last;
+        super.setLast(last);
         return this;
     }
 
@@ -69,17 +62,17 @@ public class DefaultSpdySynReplyFrame extends DefaultSpdyHeaderBlock
 
     @Override
     public String toString() {
-        StringBuilder buf = new StringBuilder();
-        buf.append(getClass().getSimpleName());
-        buf.append("(last: ");
-        buf.append(isLast());
-        buf.append(')');
-        buf.append(StringUtil.NEWLINE);
-        buf.append("--> Stream-ID = ");
-        buf.append(streamId);
-        buf.append(StringUtil.NEWLINE);
-        buf.append("--> Headers:");
-        buf.append(StringUtil.NEWLINE);
+        StringBuilder buf = new StringBuilder()
+            .append(StringUtil.simpleClassName(this))
+            .append("(last: ")
+            .append(isLast())
+            .append(')')
+            .append(StringUtil.NEWLINE)
+            .append("--> Stream-ID = ")
+            .append(streamId())
+            .append(StringUtil.NEWLINE)
+            .append("--> Headers:")
+            .append(StringUtil.NEWLINE);
         appendHeaders(buf);
 
         // Remove the last newline.

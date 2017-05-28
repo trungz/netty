@@ -16,12 +16,9 @@
 package io.netty.example.factorial;
 
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundMessageHandlerAdapter;
+import io.netty.channel.SimpleChannelInboundHandler;
 
 import java.math.BigInteger;
-import java.util.Formatter;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Handler for a server-side channel.  This handler maintains stateful
@@ -30,36 +27,27 @@ import java.util.logging.Logger;
  * to create a new handler instance whenever you create a new channel and insert
  * this handler  to avoid a race condition.
  */
-public class FactorialServerHandler extends ChannelInboundMessageHandlerAdapter<BigInteger> {
-
-    private static final Logger logger = Logger.getLogger(
-            FactorialServerHandler.class.getName());
+public class FactorialServerHandler extends SimpleChannelInboundHandler<BigInteger> {
 
     private BigInteger lastMultiplier = new BigInteger("1");
     private BigInteger factorial = new BigInteger("1");
 
     @Override
-    public void messageReceived(
-            ChannelHandlerContext ctx, BigInteger msg) throws Exception {
+    public void channelRead0(ChannelHandlerContext ctx, BigInteger msg) throws Exception {
         // Calculate the cumulative factorial and send it to the client.
         lastMultiplier = msg;
         factorial = factorial.multiply(msg);
-        ctx.write(factorial);
+        ctx.writeAndFlush(factorial);
     }
 
     @Override
-    public void channelInactive(
-            ChannelHandlerContext ctx) throws Exception {
-        logger.info(new Formatter().format(
-                "Factorial of %,d is: %,d", lastMultiplier, factorial).toString());
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        System.err.printf("Factorial of %,d is: %,d%n", lastMultiplier, factorial);
     }
 
     @Override
-    public void exceptionCaught(
-            ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        logger.log(
-                Level.WARNING,
-                "Unexpected exception from downstream.", cause);
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        cause.printStackTrace();
         ctx.close();
     }
 }

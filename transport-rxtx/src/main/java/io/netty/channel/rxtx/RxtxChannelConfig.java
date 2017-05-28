@@ -18,6 +18,9 @@ package io.netty.channel.rxtx;
 import gnu.io.SerialPort;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelConfig;
+import io.netty.channel.MessageSizeEstimator;
+import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
 
 /**
  * A configuration class for RXTX device connections.
@@ -31,19 +34,19 @@ import io.netty.channel.ChannelConfig;
  * <tr>
  * <th>Name</th><th>Associated setter method</th>
  * </tr><tr>
- * <td>{@link io.netty.channel.rxtx.RxtxChannelOption#BAUD_RATE}</td><td>{@link #setBaudrate(int)}</td>
+ * <td>{@link RxtxChannelOption#BAUD_RATE}</td><td>{@link #setBaudrate(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.rxtx.RxtxChannelOption#DTR}</td><td>{@link #setDtr(boolean)}</td>
+ * <td>{@link RxtxChannelOption#DTR}</td><td>{@link #setDtr(boolean)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.rxtx.RxtxChannelOption#RTS}</td><td>{@link #setRts(boolean)}</td>
+ * <td>{@link RxtxChannelOption#RTS}</td><td>{@link #setRts(boolean)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.rxtx.RxtxChannelOption#STOP_BITS}</td><td>{@link #setStopbits(Stopbits)}</td>
+ * <td>{@link RxtxChannelOption#STOP_BITS}</td><td>{@link #setStopbits(Stopbits)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.rxtx.RxtxChannelOption#DATA_BITS}</td><td>{@link #setDatabits(Databits)}</td>
+ * <td>{@link RxtxChannelOption#DATA_BITS}</td><td>{@link #setDatabits(Databits)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.rxtx.RxtxChannelOption#PARITY_BIT}</td><td>{@link #setParitybit(Paritybit)}</td>
+ * <td>{@link RxtxChannelOption#PARITY_BIT}</td><td>{@link #setParitybit(Paritybit)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.rxtx.RxtxChannelOption#WAIT_TIME}</td><td>{@link #setWaitTimeMillis(int)}</td>
+ * <td>{@link RxtxChannelOption#WAIT_TIME}</td><td>{@link #setWaitTimeMillis(int)}</td>
  * </tr>
  * </table>
  */
@@ -254,12 +257,26 @@ public interface RxtxChannelConfig extends ChannelConfig {
      *
      * @param waitTimeMillis The number of milliseconds to wait, defaulting to 0 (no
      *     wait) if unset
-     * @throws IllegalArgumentException if the supplied value is < 0
+     * @throws IllegalArgumentException if the supplied value is &lt; 0
      */
     RxtxChannelConfig setWaitTimeMillis(int waitTimeMillis);
 
+    /**
+     * Sets the maximal time (in ms) to block while try to read from the serial port. Default is 1000ms
+     */
+    RxtxChannelConfig setReadTimeout(int readTimeout);
+
+    /**
+     * Return the maximal time (in ms) to block and wait for something to be ready to read.
+     */
+    int getReadTimeout();
+
     @Override
     RxtxChannelConfig setConnectTimeoutMillis(int connectTimeoutMillis);
+
+    @Override
+    @Deprecated
+    RxtxChannelConfig setMaxMessagesPerRead(int maxMessagesPerRead);
 
     @Override
     RxtxChannelConfig setWriteSpinCount(int writeSpinCount);
@@ -268,5 +285,23 @@ public interface RxtxChannelConfig extends ChannelConfig {
     RxtxChannelConfig setAllocator(ByteBufAllocator allocator);
 
     @Override
+    RxtxChannelConfig setRecvByteBufAllocator(RecvByteBufAllocator allocator);
+
+    @Override
     RxtxChannelConfig setAutoRead(boolean autoRead);
+
+    @Override
+    RxtxChannelConfig setAutoClose(boolean autoClose);
+
+    @Override
+    RxtxChannelConfig setWriteBufferHighWaterMark(int writeBufferHighWaterMark);
+
+    @Override
+    RxtxChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark);
+
+    @Override
+    RxtxChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark);
+
+    @Override
+    RxtxChannelConfig setMessageSizeEstimator(MessageSizeEstimator estimator);
 }

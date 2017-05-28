@@ -15,71 +15,67 @@
  */
 package io.netty.handler.codec;
 
+import io.netty.util.Signal;
+
 public class DecoderResult {
 
-    public static final DecoderResult SUCCESS = new DecoderResult(false, null);
+    protected static final Signal SIGNAL_UNFINISHED = Signal.valueOf(DecoderResult.class, "UNFINISHED");
+    protected static final Signal SIGNAL_SUCCESS = Signal.valueOf(DecoderResult.class, "SUCCESS");
+
+    public static final DecoderResult UNFINISHED = new DecoderResult(SIGNAL_UNFINISHED);
+    public static final DecoderResult SUCCESS = new DecoderResult(SIGNAL_SUCCESS);
 
     public static DecoderResult failure(Throwable cause) {
         if (cause == null) {
             throw new NullPointerException("cause");
         }
-        return new DecoderResult(false, cause);
+        return new DecoderResult(cause);
     }
 
-    public static DecoderResult partialFailure(Throwable cause) {
+    private final Throwable cause;
+
+    protected DecoderResult(Throwable cause) {
         if (cause == null) {
             throw new NullPointerException("cause");
         }
-        return new DecoderResult(true, cause);
-    }
-
-    private final boolean partial;
-    private final Throwable cause;
-
-    protected DecoderResult(boolean partial, Throwable cause) {
-        if (partial && cause == null) {
-            throw new IllegalArgumentException("successful result cannot be partial.");
-        }
-
-        this.partial = partial;
         this.cause = cause;
     }
 
+    public boolean isFinished() {
+        return cause != SIGNAL_UNFINISHED;
+    }
+
     public boolean isSuccess() {
-        return cause == null;
+        return cause == SIGNAL_SUCCESS;
     }
 
     public boolean isFailure() {
-        return cause != null;
-    }
-
-    public boolean isCompleteFailure() {
-        return cause != null && !partial;
-    }
-
-    public boolean isPartialFailure() {
-        return partial;
+        return cause != SIGNAL_SUCCESS && cause != SIGNAL_UNFINISHED;
     }
 
     public Throwable cause() {
-        return cause;
+        if (isFailure()) {
+            return cause;
+        } else {
+            return null;
+        }
     }
 
     @Override
     public String toString() {
-        if (isSuccess()) {
-            return "success";
-        }
+        if (isFinished()) {
+            if (isSuccess()) {
+                return "success";
+            }
 
-        String cause = cause().toString();
-        StringBuilder buf = new StringBuilder(cause.length() + 17);
-        if (isPartialFailure()) {
-            buf.append("partial_");
+            String cause = cause().toString();
+            return new StringBuilder(cause.length() + 17)
+                .append("failure(")
+                .append(cause)
+                .append(')')
+                .toString();
+        } else {
+            return "unfinished";
         }
-        buf.append("failure(");
-        buf.append(cause);
-        buf.append(')');
-
-        return buf.toString();
     }
 }

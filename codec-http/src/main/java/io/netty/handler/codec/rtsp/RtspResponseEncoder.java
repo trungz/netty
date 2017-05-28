@@ -15,32 +15,9 @@
  */
 package io.netty.handler.codec.rtsp;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.HttpResponse;
-import io.netty.util.CharsetUtil;
-
 /**
- * Encodes an RTSP response represented in {@link FullHttpResponse} into
- * a {@link ByteBuf}.
-
+ * @deprecated Use {@link RtspEncoder} directly instead
  */
-public class RtspResponseEncoder extends RtspObjectEncoder<HttpResponse> {
-
-    @Override
-    public boolean isEncodable(Object msg) throws Exception {
-        return msg instanceof FullHttpResponse;
-    }
-
-    @Override
-    protected void encodeInitialLine(ByteBuf buf, HttpResponse response)
-            throws Exception {
-        buf.writeBytes(response.getProtocolVersion().toString().getBytes(CharsetUtil.US_ASCII));
-        buf.writeByte((byte) ' ');
-        buf.writeBytes(String.valueOf(response.getStatus().code()).getBytes(CharsetUtil.US_ASCII));
-        buf.writeByte((byte) ' ');
-        buf.writeBytes(String.valueOf(response.getStatus().reasonPhrase()).getBytes(CharsetUtil.US_ASCII));
-        buf.writeByte((byte) '\r');
-        buf.writeByte((byte) '\n');
-    }
+@Deprecated
+public class RtspResponseEncoder extends RtspEncoder {
 }

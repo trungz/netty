@@ -17,12 +17,10 @@ package io.netty.handler.timeout;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelHandlerAdapter;
+import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelStateHandlerAdapter;
 
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -33,7 +31,7 @@ import java.util.concurrent.TimeUnit;
  * // The connection is closed when there is no inbound traffic
  * // for 30 seconds.
  *
- * public class MyChannelInitializer extends {@link ChannelInitializer}&lt{@link Channel}&gt {
+ * public class MyChannelInitializer extends {@link ChannelInitializer}&lt;{@link Channel}&gt; {
  *     public void initChannel({@link Channel} channel) {
  *         channel.pipeline().addLast("readTimeoutHandler", new {@link ReadTimeoutHandler}(30);
  *         channel.pipeline().addLast("myHandler", new MyHandler());
@@ -41,7 +39,7 @@ import java.util.concurrent.TimeUnit;
  * }
  *
  * // Handler should handle the {@link ReadTimeoutException}.
- * public class MyHandler extends {@link ChannelHandlerAdapter} {
+ * public class MyHandler extends {@link ChannelDuplexHandler} {
  *     {@code @Override}
  *     public void exceptionCaught({@link ChannelHandlerContext} ctx, {@link Throwable} cause)
  *             throws {@link Exception} {
@@ -60,19 +58,8 @@ import java.util.concurrent.TimeUnit;
  * </pre>
  * @see WriteTimeoutHandler
  * @see IdleStateHandler
- *
- * @apiviz.landmark
- * @apiviz.has io.netty.handler.timeout.TimeoutException oneway - - raises
  */
-public class ReadTimeoutHandler extends ChannelStateHandlerAdapter {
-
-    private final long timeoutMillis;
-
-    private volatile ScheduledFuture<?> timeout;
-    private volatile long lastReadTime;
-
-    private volatile int state; // 0 - none, 1 - Initialized, 2 - Destroyed;
-
+public class ReadTimeoutHandler extends IdleStateHandler {
     private boolean closed;
 
     /**
@@ -94,128 +81,23 @@ public class ReadTimeoutHandler extends ChannelStateHandlerAdapter {
      *        the {@link TimeUnit} of {@code timeout}
      */
     public ReadTimeoutHandler(long timeout, TimeUnit unit) {
-        if (unit == null) {
-            throw new NullPointerException("unit");
-        }
-
-        if (timeout <= 0) {
-            timeoutMillis = 0;
-        } else {
-            timeoutMillis = Math.max(unit.toMillis(timeout), 1);
-        }
+        super(timeout, 0, 0, unit);
     }
 
     @Override
-    public void beforeAdd(ChannelHandlerContext ctx) throws Exception {
-        if (ctx.channel().isActive() && ctx.channel().isRegistered()) {
-            // channelActvie() event has been fired already, which means this.channelActive() will
-            // not be invoked. We have to initialize here instead.
-            initialize(ctx);
-        } else {
-            // channelActive() event has not been fired yet.  this.channelActive() will be invoked
-            // and initialization will occur there.
-        }
+    protected final void channelIdle(ChannelHandlerContext ctx, IdleStateEvent evt) throws Exception {
+        assert evt.state() == IdleState.READER_IDLE;
+        readTimedOut(ctx);
     }
 
-    @Override
-    public void beforeRemove(ChannelHandlerContext ctx) throws Exception {
-        destroy();
-    }
-
-    @Override
-    public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
-        // Initialize early if channel is active already.
-        if (ctx.channel().isActive()) {
-            initialize(ctx);
-        }
-        super.channelRegistered(ctx);
-    }
-
-    @Override
-    public void channelActive(ChannelHandlerContext ctx) throws Exception {
-        // This method will be invoked only if this handler was added
-        // before channelActive() event is fired.  If a user adds this handler
-        // after the channelActive() event, initialize() will be called by beforeAdd().
-        initialize(ctx);
-        super.channelActive(ctx);
-    }
-
-    @Override
-    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        destroy();
-        super.channelInactive(ctx);
-    }
-
-    @Override
-    public void inboundBufferUpdated(ChannelHandlerContext ctx) throws Exception {
-        lastReadTime = System.currentTimeMillis();
-        ctx.fireInboundBufferUpdated();
-    }
-
-    private void initialize(ChannelHandlerContext ctx) {
-        // Avoid the case where destroy() is called before scheduling timeouts.
-        // See: https://github.com/netty/netty/issues/143
-        switch (state) {
-        case 1:
-        case 2:
-            return;
-        }
-
-        state = 1;
-
-        lastReadTime = System.currentTimeMillis();
-        if (timeoutMillis > 0) {
-            timeout = ctx.executor().schedule(
-                    new ReadTimeoutTask(ctx),
-                    timeoutMillis, TimeUnit.MILLISECONDS);
-        }
-    }
-
-    private void destroy() {
-        state = 2;
-
-        if (timeout != null) {
-            timeout.cancel(false);
-            timeout = null;
-        }
-    }
-
+    /**
+     * Is called when a read timeout was detected.
+     */
     protected void readTimedOut(ChannelHandlerContext ctx) throws Exception {
         if (!closed) {
             ctx.fireExceptionCaught(ReadTimeoutException.INSTANCE);
             ctx.close();
             closed = true;
-        }
-    }
-
-    private final class ReadTimeoutTask implements Runnable {
-
-        private final ChannelHandlerContext ctx;
-
-        ReadTimeoutTask(ChannelHandlerContext ctx) {
-            this.ctx = ctx;
-        }
-
-        @Override
-        public void run() {
-            if (!ctx.channel().isOpen()) {
-                return;
-            }
-
-            long currentTime = System.currentTimeMillis();
-            long nextDelay = timeoutMillis - (currentTime - lastReadTime);
-            if (nextDelay <= 0) {
-                // Read timed out - set a new timeout and notify the callback.
-                timeout = ctx.executor().schedule(this, timeoutMillis, TimeUnit.MILLISECONDS);
-                try {
-                    readTimedOut(ctx);
-                } catch (Throwable t) {
-                    ctx.fireExceptionCaught(t);
-                }
-            } else {
-                // Read occurred before the timeout - set a new timeout with shorter delay.
-                timeout = ctx.executor().schedule(this, nextDelay, TimeUnit.MILLISECONDS);
-            }
         }
     }
 }

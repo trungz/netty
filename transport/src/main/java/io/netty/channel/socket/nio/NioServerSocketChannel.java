@@ -15,20 +15,26 @@
  */
 package io.netty.channel.socket.nio;
 
-import io.netty.buffer.BufType;
-import io.netty.buffer.MessageBuf;
 import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelMetadata;
+import io.netty.channel.ChannelOutboundBuffer;
+import io.netty.util.internal.SocketUtils;
 import io.netty.channel.nio.AbstractNioMessageChannel;
 import io.netty.channel.socket.DefaultServerSocketChannelConfig;
 import io.netty.channel.socket.ServerSocketChannelConfig;
+import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.SocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.nio.channels.spi.SelectorProvider;
+import java.util.List;
 
 /**
  * A {@link io.netty.channel.socket.ServerSocketChannel} implementation which uses
@@ -37,11 +43,20 @@ import java.nio.channels.SocketChannel;
 public class NioServerSocketChannel extends AbstractNioMessageChannel
                              implements io.netty.channel.socket.ServerSocketChannel {
 
-    private static final ChannelMetadata METADATA = new ChannelMetadata(BufType.MESSAGE, false);
+    private static final ChannelMetadata METADATA = new ChannelMetadata(false, 16);
+    private static final SelectorProvider DEFAULT_SELECTOR_PROVIDER = SelectorProvider.provider();
 
-    private static ServerSocketChannel newSocket() {
+    private static final InternalLogger logger = InternalLoggerFactory.getInstance(NioServerSocketChannel.class);
+
+    private static ServerSocketChannel newSocket(SelectorProvider provider) {
         try {
-            return ServerSocketChannel.open();
+            /**
+             *  Use the {@link SelectorProvider} to open {@link SocketChannel} and so remove condition in
+             *  {@link SelectorProvider#provider()} which is called by each ServerSocketChannel.open() otherwise.
+             *
+             *  See <a href="https://github.com/netty/netty/issues/2308">#2308</a>.
+             */
+            return provider.openServerSocketChannel();
         } catch (IOException e) {
             throw new ChannelException(
                     "Failed to open a server socket.", e);
@@ -54,8 +69,22 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
      * Create a new instance
      */
     public NioServerSocketChannel() {
-        super(null, null, newSocket(), SelectionKey.OP_ACCEPT);
-        config = new DefaultServerSocketChannelConfig(this, javaChannel().socket());
+        this(newSocket(DEFAULT_SELECTOR_PROVIDER));
+    }
+
+    /**
+     * Create a new instance using the given {@link SelectorProvider}.
+     */
+    public NioServerSocketChannel(SelectorProvider provider) {
+        this(newSocket(provider));
+    }
+
+    /**
+     * Create a new instance using the given {@link ServerSocketChannel}.
+     */
+    public NioServerSocketChannel(ServerSocketChannel channel) {
+        super(null, channel, SelectionKey.OP_ACCEPT);
+        config = new NioServerSocketChannelConfig(this, javaChannel().socket());
     }
 
     @Override
@@ -90,12 +119,16 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
 
     @Override
     protected SocketAddress localAddress0() {
-        return javaChannel().socket().getLocalSocketAddress();
+        return SocketUtils.localSocketAddress(javaChannel().socket());
     }
 
     @Override
     protected void doBind(SocketAddress localAddress) throws Exception {
-        javaChannel().socket().bind(localAddress, config.getBacklog());
+        if (PlatformDependent.javaVersion() >= 7) {
+            javaChannel().bind(localAddress, config.getBacklog());
+        } else {
+            javaChannel().socket().bind(localAddress, config.getBacklog());
+        }
     }
 
     @Override
@@ -104,13 +137,25 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
     }
 
     @Override
-    protected int doReadMessages(MessageBuf<Object> buf) throws Exception {
-        SocketChannel ch = javaChannel().accept();
-        if (ch == null) {
-            return 0;
+    protected int doReadMessages(List<Object> buf) throws Exception {
+        SocketChannel ch = SocketUtils.accept(javaChannel());
+
+        try {
+            if (ch != null) {
+                buf.add(new NioSocketChannel(this, ch));
+                return 1;
+            }
+        } catch (Throwable t) {
+            logger.warn("Failed to create a new channel from an accepted socket.", t);
+
+            try {
+                ch.close();
+            } catch (Throwable t2) {
+                logger.warn("Failed to close a socket.", t2);
+            }
         }
-        buf.add(new NioSocketChannel(this, null, ch));
-        return 1;
+
+        return 0;
     }
 
     // Unnecessary stuff
@@ -136,7 +181,23 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
     }
 
     @Override
-    protected int doWriteMessages(MessageBuf<Object> buf, boolean lastSpin) throws Exception {
+    protected boolean doWriteMessage(Object msg, ChannelOutboundBuffer in) throws Exception {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    protected final Object filterOutboundMessage(Object msg) throws Exception {
+        throw new UnsupportedOperationException();
+    }
+
+    private final class NioServerSocketChannelConfig extends DefaultServerSocketChannelConfig {
+        private NioServerSocketChannelConfig(NioServerSocketChannel channel, ServerSocket javaSocket) {
+            super(channel, javaSocket);
+        }
+
+        @Override
+        protected void autoReadCleared() {
+            clearReadPending();
+        }
     }
 }

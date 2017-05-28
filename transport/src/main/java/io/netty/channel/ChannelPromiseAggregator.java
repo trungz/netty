@@ -16,51 +16,23 @@
 
 package io.netty.channel;
 
-import java.util.HashSet;
-import java.util.Set;
-
+import io.netty.util.concurrent.PromiseAggregator;
+import io.netty.util.concurrent.PromiseCombiner;
 
 /**
+ * @deprecated Use {@link PromiseCombiner}
+ *
  * Class which is used to consolidate multiple channel futures into one, by
  * listening to the individual futures and producing an aggregated result
  * (success/failure) when all futures have completed.
  */
-public final class ChannelPromiseAggregator implements ChannelFutureListener {
-
-    private final ChannelPromise aggregatePromise;
-
-    private Set<ChannelPromise> pendingPromises;
+@Deprecated
+public final class ChannelPromiseAggregator
+    extends PromiseAggregator<Void, ChannelFuture>
+    implements ChannelFutureListener {
 
     public ChannelPromiseAggregator(ChannelPromise aggregatePromise) {
-        this.aggregatePromise = aggregatePromise;
+        super(aggregatePromise);
     }
 
-    public void addFuture(ChannelPromise promise) {
-        synchronized (this) {
-            if (pendingPromises == null) {
-                pendingPromises = new HashSet<ChannelPromise>();
-            }
-            pendingPromises.add(promise);
-        }
-        promise.addListener(this);
-    }
-
-    @Override
-    public synchronized void operationComplete(ChannelFuture future) throws Exception {
-        if (pendingPromises == null) {
-            aggregatePromise.setSuccess();
-        } else {
-            pendingPromises.remove(future);
-            if (!future.isSuccess()) {
-                aggregatePromise.setFailure(future.cause());
-                for (ChannelPromise pendingFuture : pendingPromises) {
-                    pendingFuture.setFailure(future.cause());
-                }
-            } else {
-                if (pendingPromises.isEmpty()) {
-                    aggregatePromise.setSuccess();
-                }
-            }
-        }
-    }
 }

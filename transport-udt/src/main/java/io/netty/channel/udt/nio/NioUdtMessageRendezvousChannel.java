@@ -22,12 +22,13 @@ import io.netty.channel.udt.UdtMessage;
  * Message Rendezvous for UDT Datagrams.
  * <p>
  * Note: send/receive must use {@link UdtMessage} in the pipeline
+ *
+ * @deprecated The UDT transport is no longer maintained and will be removed.
  */
-public class NioUdtMessageRendezvousChannel extends
-        NioUdtMessageConnectorChannel {
+@Deprecated
+public class NioUdtMessageRendezvousChannel extends NioUdtMessageConnectorChannel {
 
     public NioUdtMessageRendezvousChannel() {
         super(NioUdtProvider.newRendezvousChannelUDT(TypeUDT.DATAGRAM));
     }
-
 }

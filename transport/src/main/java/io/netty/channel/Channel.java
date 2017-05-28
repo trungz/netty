@@ -16,7 +16,7 @@
 package io.netty.channel;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.MessageBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.ServerSocketChannel;
@@ -68,21 +68,21 @@ import java.net.SocketAddress;
  * operations.  For example, with the old I/O datagram transport, multicast
  * join / leave operations are provided by {@link DatagramChannel}.
  *
- * @apiviz.landmark
- * @apiviz.composedOf io.netty.channel.ChannelConfig
- * @apiviz.composedOf io.netty.channel.ChannelPipeline
- *
- * @apiviz.exclude ^io\.netty\.channel\.([a-z]+\.)+[^\.]+Channel$
+ * <h3>Release resources</h3>
+ * <p>
+ * It is important to call {@link #close()} or {@link #close(ChannelPromise)} to release all
+ * resources once you are done with the {@link Channel}. This ensures all resources are
+ * released in a proper way, i.e. filehandles.
  */
-public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPropertyAccess, Comparable<Channel> {
+public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparable<Channel> {
 
     /**
-     * Returns the unique integer ID of this channel.
+     * Returns the globally unique identifier of this {@link Channel}.
      */
-    Integer id();
+    ChannelId id();
 
     /**
-     * Return the {@link EventLoop} this {@link Channel} was registered too.
+     * Return the {@link EventLoop} this {@link Channel} was registered to.
      */
     EventLoop eventLoop();
 
@@ -100,7 +100,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPr
     ChannelConfig config();
 
     /**
-     * Returns {@code true} if the {@link Channel} is open an may get active later
+     * Returns {@code true} if the {@link Channel} is open and may get active later
      */
     boolean isOpen();
 
@@ -118,22 +118,6 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPr
      * Return the {@link ChannelMetadata} of the {@link Channel} which describe the nature of the {@link Channel}.
      */
     ChannelMetadata metadata();
-
-    /**
-     * Return the last {@link ByteBuf} of the {@link ChannelPipeline} which belongs to this {@link Channel}.
-     *
-     * This method may throw an {@link NoSuchBufferException} if you try to access this buffer and the
-     * {@link ChannelPipeline} does not contain any {@link ByteBuf}.
-     */
-    ByteBuf outboundByteBuffer();
-
-    /**
-     * Return the last {@link MessageBuf} of the {@link ChannelPipeline} which belongs to this {@link Channel}.
-     *
-     * This method may throw an {@link NoSuchBufferException} if you try to access this buffer and the
-     * {@link ChannelPipeline} does not contain any {@link MessageBuf}.
-     */
-    <T> MessageBuf<T> outboundMessageBuffer();
 
     /**
      * Returns the local address where this channel is bound to.  The returned
@@ -156,7 +140,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPr
      *         {@code null} if this channel is not connected.
      *         If this channel is not connected but it can receive messages
      *         from arbitrary remote addresses (e.g. {@link DatagramChannel},
-     *         use {@link DatagramPacket#remoteAddress()} to determine
+     *         use {@link DatagramPacket#recipient()} to determine
      *         the origination of the received message as this method will
      *         return {@code null}.
      */
@@ -169,25 +153,66 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPr
     ChannelFuture closeFuture();
 
     /**
-     * <strong>Caution</strong> for transport implementations use only!
+     * Returns {@code true} if and only if the I/O thread will perform the
+     * requested write operation immediately.  Any write requests made when
+     * this method returns {@code false} are queued until the I/O thread is
+     * ready to process the queued write requests.
+     */
+    boolean isWritable();
+
+    /**
+     * Get how many bytes can be written until {@link #isWritable()} returns {@code false}.
+     * This quantity will always be non-negative. If {@link #isWritable()} is {@code false} then 0.
+     */
+    long bytesBeforeUnwritable();
+
+    /**
+     * Get how many bytes must be drained from underlying buffers until {@link #isWritable()} returns {@code true}.
+     * This quantity will always be non-negative. If {@link #isWritable()} is {@code true} then 0.
+     */
+    long bytesBeforeWritable();
+
+    /**
+     * Returns an <em>internal-use-only</em> object that provides unsafe operations.
      */
     Unsafe unsafe();
 
     /**
-     * <strong>Unsafe</strong> operations that should <strong>never</strong> be called
-     * from user-code. These methods are only provided to implement the actual transport.
+     * Return the assigned {@link ChannelPipeline}.
+     */
+    ChannelPipeline pipeline();
+
+    /**
+     * Return the assigned {@link ByteBufAllocator} which will be used to allocate {@link ByteBuf}s.
+     */
+    ByteBufAllocator alloc();
+
+    @Override
+    Channel read();
+
+    @Override
+    Channel flush();
+
+    /**
+     * <em>Unsafe</em> operations that should <em>never</em> be called from user-code. These methods
+     * are only provided to implement the actual transport, and must be invoked from an I/O thread except for the
+     * following methods:
+     * <ul>
+     *   <li>{@link #localAddress()}</li>
+     *   <li>{@link #remoteAddress()}</li>
+     *   <li>{@link #closeForcibly()}</li>
+     *   <li>{@link #register(EventLoop, ChannelPromise)}</li>
+     *   <li>{@link #deregister(ChannelPromise)}</li>
+     *   <li>{@link #voidPromise()}</li>
+     * </ul>
      */
     interface Unsafe {
-        /**
-         * Return the {@link ChannelHandlerContext} which is directly connected to the outbound of the
-         * underlying transport.
-         */
-        ChannelHandlerContext directOutboundContext();
 
         /**
-         * Return a {@link VoidChannelPromise}. This method always return the same instance.
+         * Return the assigned {@link RecvByteBufAllocator.Handle} which will be used to allocate {@link ByteBuf}'s when
+         * receiving data.
          */
-        ChannelPromise voidFuture();
+        RecvByteBufAllocator.Handle recvBufAllocHandle();
 
         /**
          * Return the {@link SocketAddress} to which is bound local or
@@ -202,7 +227,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPr
         SocketAddress remoteAddress();
 
         /**
-         * Register the {@link Channel} of the {@link ChannelPromise} with the {@link EventLoop} and notify
+         * Register the {@link Channel} of the {@link ChannelPromise} and notify
          * the {@link ChannelFuture} once the registration was complete.
          */
         void register(EventLoop eventLoop, ChannelPromise promise);
@@ -253,21 +278,25 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPr
         void beginRead();
 
         /**
-         * Flush out all data that was buffered in the buffer of the {@link #directOutboundContext()} and was not
-         * flushed out yet. After that is done the {@link ChannelFuture} will get notified
+         * Schedules a write operation.
          */
-        void flush(ChannelPromise promise);
+        void write(Object msg, ChannelPromise promise);
 
         /**
-         * Flush out all data now.
+         * Flush out all write operations scheduled via {@link #write(Object, ChannelPromise)}.
          */
-        void flushNow();
+        void flush();
 
         /**
-         * Send a {@link FileRegion} to the remote peer and notify the {@link ChannelPromise} once it completes
-         * or an error was detected. Once the {@link FileRegion} was transfered or an error was thrown it will
-         * automaticly closed via {@link FileRegion#close()}.
+         * Return a special ChannelPromise which can be reused and passed to the operations in {@link Unsafe}.
+         * It will never be notified of a success or error and so is only a placeholder for operations
+         * that take a {@link ChannelPromise} as argument but for which you not want to get notified.
          */
-        void sendFile(FileRegion region, ChannelPromise promise);
+        ChannelPromise voidPromise();
+
+        /**
+         * Returns the {@link ChannelOutboundBuffer} of the {@link Channel} where the pending write requests are stored.
+         */
+        ChannelOutboundBuffer outboundBuffer();
     }
 }

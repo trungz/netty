@@ -15,291 +15,35 @@
  */
 package io.netty.buffer;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.channels.GatheringByteChannel;
-import java.nio.channels.ScatteringByteChannel;
-
-
 /**
  * A derived buffer which exposes its parent's sub-region only.  It is
  * recommended to use {@link ByteBuf#slice()} and
  * {@link ByteBuf#slice(int, int)} instead of calling the constructor
  * explicitly.
+ *
+ * @deprecated Do not use.
  */
-public class SlicedByteBuf extends AbstractByteBuf {
+@Deprecated
+public class SlicedByteBuf extends AbstractUnpooledSlicedByteBuf {
 
-    private final ByteBuf buffer;
-    private final int adjustment;
-    private final int length;
+    private int length;
 
     public SlicedByteBuf(ByteBuf buffer, int index, int length) {
-        super(length);
-        if (index < 0 || index > buffer.capacity()) {
-            throw new IndexOutOfBoundsException("Invalid index of " + index
-                    + ", maximum is " + buffer.capacity());
-        }
+        super(buffer, index, length);
+    }
 
-        if (index + length > buffer.capacity()) {
-            throw new IndexOutOfBoundsException("Invalid combined index of "
-                    + (index + length) + ", maximum is " + buffer.capacity());
-        }
-
-        if (buffer instanceof SlicedByteBuf) {
-            this.buffer = ((SlicedByteBuf) buffer).buffer;
-            adjustment = ((SlicedByteBuf) buffer).adjustment + index;
-        } else if (buffer instanceof DuplicatedByteBuf) {
-            this.buffer = buffer.unwrap();
-            adjustment = index;
-        } else {
-            this.buffer = buffer;
-            adjustment = index;
-        }
+    @Override
+    final void initLength(int length) {
         this.length = length;
-
-        writerIndex(length);
     }
 
     @Override
-    public ByteBuf unwrap() {
-        return buffer;
-    }
-
-    @Override
-    public ByteBufAllocator alloc() {
-        return buffer.alloc();
-    }
-
-    @Override
-    public ByteOrder order() {
-        return buffer.order();
-    }
-
-    @Override
-    public boolean isDirect() {
-        return buffer.isDirect();
+    final int length() {
+        return length;
     }
 
     @Override
     public int capacity() {
         return length;
-    }
-
-    @Override
-    public ByteBuf capacity(int newCapacity) {
-        throw new UnsupportedOperationException("sliced buffer");
-    }
-
-    @Override
-    public boolean hasArray() {
-        return buffer.hasArray();
-    }
-
-    @Override
-    public byte[] array() {
-        return buffer.array();
-    }
-
-    @Override
-    public int arrayOffset() {
-        return buffer.arrayOffset() + adjustment;
-    }
-
-    @Override
-    public byte getByte(int index) {
-        checkIndex(index);
-        return buffer.getByte(index + adjustment);
-    }
-
-    @Override
-    public short getShort(int index) {
-        checkIndex(index, 2);
-        return buffer.getShort(index + adjustment);
-    }
-
-    @Override
-    public int getUnsignedMedium(int index) {
-        checkIndex(index, 3);
-        return buffer.getUnsignedMedium(index + adjustment);
-    }
-
-    @Override
-    public int getInt(int index) {
-        checkIndex(index, 4);
-        return buffer.getInt(index + adjustment);
-    }
-
-    @Override
-    public long getLong(int index) {
-        checkIndex(index, 8);
-        return buffer.getLong(index + adjustment);
-    }
-
-    @Override
-    public ByteBuf duplicate() {
-        ByteBuf duplicate = buffer.slice(adjustment, length);
-        duplicate.setIndex(readerIndex(), writerIndex());
-        return duplicate;
-    }
-
-    @Override
-    public ByteBuf copy(int index, int length) {
-        checkIndex(index, length);
-        return buffer.copy(index + adjustment, length);
-    }
-
-    @Override
-    public ByteBuf slice(int index, int length) {
-        checkIndex(index, length);
-        if (length == 0) {
-            return Unpooled.EMPTY_BUFFER;
-        }
-        return buffer.slice(index + adjustment, length);
-    }
-
-    @Override
-    public ByteBuf getBytes(int index, ByteBuf dst, int dstIndex, int length) {
-        checkIndex(index, length);
-        buffer.getBytes(index + adjustment, dst, dstIndex, length);
-        return this;
-    }
-
-    @Override
-    public ByteBuf getBytes(int index, byte[] dst, int dstIndex, int length) {
-        checkIndex(index, length);
-        buffer.getBytes(index + adjustment, dst, dstIndex, length);
-        return this;
-    }
-
-    @Override
-    public ByteBuf getBytes(int index, ByteBuffer dst) {
-        checkIndex(index, dst.remaining());
-        buffer.getBytes(index + adjustment, dst);
-        return this;
-    }
-
-    @Override
-    public ByteBuf setByte(int index, int value) {
-        checkIndex(index);
-        buffer.setByte(index + adjustment, value);
-        return this;
-    }
-
-    @Override
-    public ByteBuf setShort(int index, int value) {
-        checkIndex(index, 2);
-        buffer.setShort(index + adjustment, value);
-        return this;
-    }
-
-    @Override
-    public ByteBuf setMedium(int index, int value) {
-        checkIndex(index, 3);
-        buffer.setMedium(index + adjustment, value);
-        return this;
-    }
-
-    @Override
-    public ByteBuf setInt(int index, int value) {
-        checkIndex(index, 4);
-        buffer.setInt(index + adjustment, value);
-        return this;
-    }
-
-    @Override
-    public ByteBuf setLong(int index, long value) {
-        checkIndex(index, 8);
-        buffer.setLong(index + adjustment, value);
-        return this;
-    }
-
-    @Override
-    public ByteBuf setBytes(int index, byte[] src, int srcIndex, int length) {
-        checkIndex(index, length);
-        buffer.setBytes(index + adjustment, src, srcIndex, length);
-        return this;
-    }
-
-    @Override
-    public ByteBuf setBytes(int index, ByteBuf src, int srcIndex, int length) {
-        checkIndex(index, length);
-        buffer.setBytes(index + adjustment, src, srcIndex, length);
-        return this;
-    }
-
-    @Override
-    public ByteBuf setBytes(int index, ByteBuffer src) {
-        checkIndex(index, src.remaining());
-        buffer.setBytes(index + adjustment, src);
-        return this;
-    }
-
-    @Override
-    public ByteBuf getBytes(int index, OutputStream out, int length)
-            throws IOException {
-        checkIndex(index, length);
-        buffer.getBytes(index + adjustment, out, length);
-        return this;
-    }
-
-    @Override
-    public int getBytes(int index, GatheringByteChannel out, int length)
-            throws IOException {
-        checkIndex(index, length);
-        return buffer.getBytes(index + adjustment, out, length);
-    }
-
-    @Override
-    public int setBytes(int index, InputStream in, int length)
-            throws IOException {
-        checkIndex(index, length);
-        return buffer.setBytes(index + adjustment, in, length);
-    }
-
-    @Override
-    public int setBytes(int index, ScatteringByteChannel in, int length)
-            throws IOException {
-        checkIndex(index, length);
-        return buffer.setBytes(index + adjustment, in, length);
-    }
-
-    @Override
-    public int nioBufferCount() {
-        return buffer.nioBufferCount();
-    }
-
-    @Override
-    public ByteBuffer nioBuffer(int index, int length) {
-        checkIndex(index, length);
-        return buffer.nioBuffer(index + adjustment, length);
-    }
-
-    @Override
-    public ByteBuffer[] nioBuffers(int index, int length) {
-        checkIndex(index, length);
-        return buffer.nioBuffers(index, length);
-    }
-
-    @Override
-    public boolean isFreed() {
-        return buffer.isFreed();
-    }
-
-    @Override
-    public void free() {
-        throw new UnsupportedOperationException("derived");
-    }
-
-    @Override
-    public ByteBuf suspendIntermediaryDeallocations() {
-        throw new UnsupportedOperationException("derived");
-    }
-
-    @Override
-    public ByteBuf resumeIntermediaryDeallocations() {
-        throw new UnsupportedOperationException("derived");
     }
 }

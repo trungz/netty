@@ -15,38 +15,49 @@
  */
 package io.netty.buffer;
 
+import io.netty.util.ReferenceCounted;
+
 /**
- * A packet which is send or receive. The contract for a {@link ByteBufHolder} is the
- * following:
- *
- * When send a {@link ByteBufHolder} the {@link ByteBufHolder} will be freed by calling {@link #free()}
- * in the actual transport implementation. When receive a {@link ByteBufHolder} the {@link #free()}
- * must be called once is is processed.
- *
+ * A packet which is send or receive.
  */
-public interface ByteBufHolder extends Freeable {
+public interface ByteBufHolder extends ReferenceCounted {
 
     /**
      * Return the data which is held by this {@link ByteBufHolder}.
-     *
      */
-    ByteBuf data();
+    ByteBuf content();
 
     /**
-     * Create a copy of this {@link ByteBufHolder} which can be used even after {@link #free()}
-     * is called.
+     * Creates a deep copy of this {@link ByteBufHolder}.
      */
     ByteBufHolder copy();
 
     /**
-     * Free of the resources that are hold by this instance. This includes the {@link ByteBuf}.
+     * Duplicates this {@link ByteBufHolder}. Be aware that this will not automatically call {@link #retain()}.
      */
-    @Override
-    void free();
+    ByteBufHolder duplicate();
 
     /**
-     * Returns {@code true} if and only if this instances was freed.
+     * Duplicates this {@link ByteBufHolder}. This method returns a retained duplicate unlike {@link #duplicate()}.
+     *
+     * @see ByteBuf#retainedDuplicate()
      */
+    ByteBufHolder retainedDuplicate();
+
+    /**
+     * Returns a new {@link ByteBufHolder} which contains the specified {@code content}.
+     */
+    ByteBufHolder replace(ByteBuf content);
+
     @Override
-    boolean isFreed();
+    ByteBufHolder retain();
+
+    @Override
+    ByteBufHolder retain(int increment);
+
+    @Override
+    ByteBufHolder touch();
+
+    @Override
+    ByteBufHolder touch(Object hint);
 }

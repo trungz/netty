@@ -17,41 +17,76 @@ package io.netty.handler.codec.http;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.DefaultHeaders.NameValidator;
 import io.netty.util.internal.StringUtil;
 
-import java.util.Map;
+import java.util.Map.Entry;
 
 /**
  * The default {@link LastHttpContent} implementation.
  */
 public class DefaultLastHttpContent extends DefaultHttpContent implements LastHttpContent {
-
-    private final HttpHeaders trailingHeaders = new DefaultHttpHeaders() {
-        @Override
-        void validateHeaderName0(String name) {
-            super.validateHeaderName0(name);
-            if (name.equalsIgnoreCase(HttpHeaders.Names.CONTENT_LENGTH) ||
-                name.equalsIgnoreCase(HttpHeaders.Names.TRANSFER_ENCODING) ||
-                name.equalsIgnoreCase(HttpHeaders.Names.TRAILER)) {
-                throw new IllegalArgumentException(
-                        "prohibited trailing header: " + name);
-            }
-        }
-    };
+    private final HttpHeaders trailingHeaders;
+    private final boolean validateHeaders;
 
     public DefaultLastHttpContent() {
         this(Unpooled.buffer(0));
     }
 
     public DefaultLastHttpContent(ByteBuf content) {
+        this(content, true);
+    }
+
+    public DefaultLastHttpContent(ByteBuf content, boolean validateHeaders) {
         super(content);
+        trailingHeaders = new TrailingHttpHeaders(validateHeaders);
+        this.validateHeaders = validateHeaders;
     }
 
     @Override
     public LastHttpContent copy() {
-        DefaultLastHttpContent copy = new DefaultLastHttpContent(data().copy());
-        copy.trailingHeaders().set(trailingHeaders());
-        return copy;
+        return replace(content().copy());
+    }
+
+    @Override
+    public LastHttpContent duplicate() {
+        return replace(content().duplicate());
+    }
+
+    @Override
+    public LastHttpContent retainedDuplicate() {
+        return replace(content().retainedDuplicate());
+    }
+
+    @Override
+    public LastHttpContent replace(ByteBuf content) {
+        final DefaultLastHttpContent dup = new DefaultLastHttpContent(content, validateHeaders);
+        dup.trailingHeaders().set(trailingHeaders());
+        return dup;
+    }
+
+    @Override
+    public LastHttpContent retain(int increment) {
+        super.retain(increment);
+        return this;
+    }
+
+    @Override
+    public LastHttpContent retain() {
+        super.retain();
+        return this;
+    }
+
+    @Override
+    public LastHttpContent touch() {
+        super.touch();
+        return this;
+    }
+
+    @Override
+    public LastHttpContent touch(Object hint) {
+        super.touch(hint);
+        return this;
     }
 
     @Override
@@ -71,11 +106,30 @@ public class DefaultLastHttpContent extends DefaultHttpContent implements LastHt
     }
 
     private void appendHeaders(StringBuilder buf) {
-        for (Map.Entry<String, String> e: trailingHeaders()) {
+        for (Entry<String, String> e : trailingHeaders()) {
             buf.append(e.getKey());
             buf.append(": ");
             buf.append(e.getValue());
             buf.append(StringUtil.NEWLINE);
+        }
+    }
+
+    private static final class TrailingHttpHeaders extends DefaultHttpHeaders {
+        private static final NameValidator<CharSequence> TrailerNameValidator = new NameValidator<CharSequence>() {
+            @Override
+            public void validateName(CharSequence name) {
+                DefaultHttpHeaders.HttpNameValidator.validateName(name);
+                if (HttpHeaderNames.CONTENT_LENGTH.contentEqualsIgnoreCase(name)
+                        || HttpHeaderNames.TRANSFER_ENCODING.contentEqualsIgnoreCase(name)
+                        || HttpHeaderNames.TRAILER.contentEqualsIgnoreCase(name)) {
+                    throw new IllegalArgumentException("prohibited trailing header: " + name);
+                }
+            }
+        };
+
+        @SuppressWarnings({ "unchecked" })
+        TrailingHttpHeaders(boolean validate) {
+            super(validate, validate ? TrailerNameValidator : NameValidator.NOT_NULL);
         }
     }
 }

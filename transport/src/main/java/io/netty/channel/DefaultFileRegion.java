@@ -15,23 +15,31 @@
  */
 package io.netty.channel;
 
-import io.netty.logging.InternalLogger;
-import io.netty.logging.InternalLoggerFactory;
+import io.netty.util.AbstractReferenceCounted;
+import io.netty.util.IllegalReferenceCountException;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
+import java.io.File;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.channels.FileChannel;
 import java.nio.channels.WritableByteChannel;
 
 /**
- * Default {@link FileRegion} implementation which transfer data from a {@link FileChannel}.
+ * Default {@link FileRegion} implementation which transfer data from a {@link FileChannel} or {@link File}.
+ *
+ * Be aware that the {@link FileChannel} will be automatically closed once {@link #refCnt()} returns
+ * {@code 0}.
  */
-public class DefaultFileRegion implements FileRegion {
+public class DefaultFileRegion extends AbstractReferenceCounted implements FileRegion {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(DefaultFileRegion.class);
-
-    private final FileChannel file;
+    private final File f;
     private final long position;
     private final long count;
+    private long transferred;
+    private FileChannel file;
 
     /**
      * Create a new instance
@@ -47,12 +55,53 @@ public class DefaultFileRegion implements FileRegion {
         if (position < 0) {
             throw new IllegalArgumentException("position must be >= 0 but was " + position);
         }
-        if (count <= 0) {
+        if (count < 0) {
             throw new IllegalArgumentException("count must be >= 0 but was " + count);
         }
         this.file = file;
         this.position = position;
         this.count = count;
+        f = null;
+    }
+
+    /**
+     * Create a new instance using the given {@link File}. The {@link File} will be opened lazily or
+     * explicitly via {@link #open()}.
+     *
+     * @param f         the {@link File} which should be transfered
+     * @param position  the position from which the transfer should start
+     * @param count     the number of bytes to transfer
+     */
+    public DefaultFileRegion(File f, long position, long count) {
+        if (f == null) {
+            throw new NullPointerException("f");
+        }
+        if (position < 0) {
+            throw new IllegalArgumentException("position must be >= 0 but was " + position);
+        }
+        if (count < 0) {
+            throw new IllegalArgumentException("count must be >= 0 but was " + count);
+        }
+        this.position = position;
+        this.count = count;
+        this.f = f;
+    }
+
+    /**
+     * Returns {@code true} if the {@link FileRegion} has a open file-descriptor
+     */
+    public boolean isOpen() {
+        return file != null;
+    }
+
+    /**
+     * Explicitly open the underlying file-descriptor if not done yet.
+     */
+    public void open() throws IOException {
+        if (!isOpen() && refCnt() > 0) {
+            // Only open if this DefaultFileRegion was not released yet.
+            file = new RandomAccessFile(f, "r").getChannel();
+        }
     }
 
     @Override
@@ -63,6 +112,17 @@ public class DefaultFileRegion implements FileRegion {
     @Override
     public long count() {
         return count;
+    }
+
+    @Deprecated
+    @Override
+    public long transfered() {
+        return transferred;
+    }
+
+    @Override
+    public long transferred() {
+        return transferred;
     }
 
     @Override
@@ -76,12 +136,28 @@ public class DefaultFileRegion implements FileRegion {
         if (count == 0) {
             return 0L;
         }
+        if (refCnt() == 0) {
+            throw new IllegalReferenceCountException(0);
+        }
+        // Call open to make sure fc is initialized. This is a no-oop if we called it before.
+        open();
 
-        return file.transferTo(this.position + position, count, target);
+        long written = file.transferTo(this.position + position, count, target);
+        if (written > 0) {
+            transferred += written;
+        }
+        return written;
     }
 
     @Override
-    public void close() {
+    protected void deallocate() {
+        FileChannel file = this.file;
+
+        if (file == null) {
+            return;
+        }
+        this.file = null;
+
         try {
             file.close();
         } catch (IOException e) {
@@ -89,5 +165,27 @@ public class DefaultFileRegion implements FileRegion {
                 logger.warn("Failed to close a file.", e);
             }
         }
+    }
+
+    @Override
+    public FileRegion retain() {
+        super.retain();
+        return this;
+    }
+
+    @Override
+    public FileRegion retain(int increment) {
+        super.retain(increment);
+        return this;
+    }
+
+    @Override
+    public FileRegion touch() {
+        return this;
+    }
+
+    @Override
+    public FileRegion touch(Object hint) {
+        return this;
     }
 }

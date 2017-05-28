@@ -18,58 +18,59 @@ package io.netty.handler.codec.http.multipart;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelException;
 import io.netty.handler.codec.http.HttpConstants;
+import io.netty.util.AbstractReferenceCounted;
 
 import java.io.IOException;
 import java.nio.charset.Charset;
+import java.util.regex.Pattern;
 
 /**
  * Abstract HttpData implementation
  */
-public abstract class AbstractHttpData implements HttpData {
+public abstract class AbstractHttpData extends AbstractReferenceCounted implements HttpData {
 
-    protected final String name;
+    private static final Pattern STRIP_PATTERN = Pattern.compile("(?:^\\s+|\\s+$|\\n)");
+    private static final Pattern REPLACE_PATTERN = Pattern.compile("[\\r\\t]");
+
+    private final String name;
     protected long definedSize;
     protected long size;
-    protected Charset charset = HttpConstants.DEFAULT_CHARSET;
-    protected boolean completed;
+    private Charset charset = HttpConstants.DEFAULT_CHARSET;
+    private boolean completed;
+    private long maxSize = DefaultHttpDataFactory.MAXSIZE;
 
     protected AbstractHttpData(String name, Charset charset, long size) {
         if (name == null) {
             throw new NullPointerException("name");
         }
-        name = name.trim();
+
+        name = REPLACE_PATTERN.matcher(name).replaceAll(" ");
+        name = STRIP_PATTERN.matcher(name).replaceAll("");
+
         if (name.isEmpty()) {
             throw new IllegalArgumentException("empty name");
         }
 
-        for (int i = 0; i < name.length(); i ++) {
-            char c = name.charAt(i);
-            if (c > 127) {
-                throw new IllegalArgumentException(
-                        "name contains non-ascii character: " + name);
-            }
-
-            // Check prohibited characters.
-            switch (c) {
-            case '=':
-            case ',':
-            case ';':
-            case ' ':
-            case '\t':
-            case '\r':
-            case '\n':
-            case '\f':
-            case 0x0b: // Vertical tab
-                throw new IllegalArgumentException(
-                        "name contains one of the following prohibited characters: " +
-                        "=,; \\t\\r\\n\\v\\f: " + name);
-            }
-        }
         this.name = name;
         if (charset != null) {
             setCharset(charset);
         }
         definedSize = size;
+    }
+
+    @Override
+    public long getMaxSize() { return maxSize; }
+
+    @Override
+    public void setMaxSize(long maxSize) {
+        this.maxSize = maxSize;
+    }
+
+    @Override
+    public void checkSize(long newSize) throws IOException {
+        if (maxSize >= 0 && newSize > maxSize) {
+            throw new IOException("Size exceed allowed maximum capacity");
+        }
     }
 
     @Override
@@ -80,6 +81,10 @@ public abstract class AbstractHttpData implements HttpData {
     @Override
     public boolean isCompleted() {
         return completed;
+    }
+
+    protected void setCompleted() {
+        completed = true;
     }
 
     @Override
@@ -101,7 +106,12 @@ public abstract class AbstractHttpData implements HttpData {
     }
 
     @Override
-    public ByteBuf data() {
+    public long definedLength() {
+        return definedSize;
+    }
+
+    @Override
+    public ByteBuf content() {
         try {
             return getByteBuf();
         } catch (IOException e) {
@@ -110,8 +120,25 @@ public abstract class AbstractHttpData implements HttpData {
     }
 
     @Override
-    public void free() {
+    protected void deallocate() {
         delete();
     }
 
+    @Override
+    public HttpData retain() {
+        super.retain();
+        return this;
+    }
+
+    @Override
+    public HttpData retain(int increment) {
+        super.retain(increment);
+        return this;
+    }
+
+    @Override
+    public abstract HttpData touch();
+
+    @Override
+    public abstract HttpData touch(Object hint);
 }

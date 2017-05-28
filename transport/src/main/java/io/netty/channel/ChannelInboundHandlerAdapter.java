@@ -15,29 +15,119 @@
  */
 package io.netty.channel;
 
-
-import io.netty.buffer.Buf;
-
 /**
- * Abstract base class for a {@link ChannelHandler} that handles inbound data.
+ * Abstract base class for {@link ChannelInboundHandler} implementations which provide
+ * implementations of all of their methods.
  *
- * Please either extend {@link ChannelInboundByteHandlerAdapter} or
- * {@link ChannelInboundMessageHandlerAdapter}.
+ * <p>
+ * This implementation just forward the operation to the next {@link ChannelHandler} in the
+ * {@link ChannelPipeline}. Sub-classes may override a method implementation to change this.
+ * </p>
+ * <p>
+ * Be aware that messages are not released after the {@link #channelRead(ChannelHandlerContext, Object)}
+ * method returns automatically. If you are looking for a {@link ChannelInboundHandler} implementation that
+ * releases the received messages automatically, please see {@link SimpleChannelInboundHandler}.
+ * </p>
  */
-abstract class ChannelInboundHandlerAdapter
-        extends ChannelStateHandlerAdapter implements ChannelInboundHandler {
+public class ChannelInboundHandlerAdapter extends ChannelHandlerAdapter implements ChannelInboundHandler {
 
     /**
-     * Calls {@link Buf#free()} to free the buffer, sub-classes may override this.
+     * Calls {@link ChannelHandlerContext#fireChannelRegistered()} to forward
+     * to the next {@link ChannelInboundHandler} in the {@link ChannelPipeline}.
      *
-     * When doing so be aware that you will need to handle all the resource management by your own.
+     * Sub-classes may override this method to change behavior.
      */
     @Override
-    public void freeInboundBuffer(ChannelHandlerContext ctx) throws Exception {
-        if (ctx.hasInboundByteBuffer()) {
-            ctx.inboundByteBuffer().free();
-        } else {
-            ctx.inboundMessageBuffer().free();
-        }
+    public void channelRegistered(ChannelHandlerContext ctx) throws Exception {
+        ctx.fireChannelRegistered();
+    }
+
+    /**
+     * Calls {@link ChannelHandlerContext#fireChannelUnregistered()} to forward
+     * to the next {@link ChannelInboundHandler} in the {@link ChannelPipeline}.
+     *
+     * Sub-classes may override this method to change behavior.
+     */
+    @Override
+    public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        ctx.fireChannelUnregistered();
+    }
+
+    /**
+     * Calls {@link ChannelHandlerContext#fireChannelActive()} to forward
+     * to the next {@link ChannelInboundHandler} in the {@link ChannelPipeline}.
+     *
+     * Sub-classes may override this method to change behavior.
+     */
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        ctx.fireChannelActive();
+    }
+
+    /**
+     * Calls {@link ChannelHandlerContext#fireChannelInactive()} to forward
+     * to the next {@link ChannelInboundHandler} in the {@link ChannelPipeline}.
+     *
+     * Sub-classes may override this method to change behavior.
+     */
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        ctx.fireChannelInactive();
+    }
+
+    /**
+     * Calls {@link ChannelHandlerContext#fireChannelRead(Object)} to forward
+     * to the next {@link ChannelInboundHandler} in the {@link ChannelPipeline}.
+     *
+     * Sub-classes may override this method to change behavior.
+     */
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        ctx.fireChannelRead(msg);
+    }
+
+    /**
+     * Calls {@link ChannelHandlerContext#fireChannelReadComplete()} to forward
+     * to the next {@link ChannelInboundHandler} in the {@link ChannelPipeline}.
+     *
+     * Sub-classes may override this method to change behavior.
+     */
+    @Override
+    public void channelReadComplete(ChannelHandlerContext ctx) throws Exception {
+        ctx.fireChannelReadComplete();
+    }
+
+    /**
+     * Calls {@link ChannelHandlerContext#fireUserEventTriggered(Object)} to forward
+     * to the next {@link ChannelInboundHandler} in the {@link ChannelPipeline}.
+     *
+     * Sub-classes may override this method to change behavior.
+     */
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        ctx.fireUserEventTriggered(evt);
+    }
+
+    /**
+     * Calls {@link ChannelHandlerContext#fireChannelWritabilityChanged()} to forward
+     * to the next {@link ChannelInboundHandler} in the {@link ChannelPipeline}.
+     *
+     * Sub-classes may override this method to change behavior.
+     */
+    @Override
+    public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
+        ctx.fireChannelWritabilityChanged();
+    }
+
+    /**
+     * Calls {@link ChannelHandlerContext#fireExceptionCaught(Throwable)} to forward
+     * to the next {@link ChannelHandler} in the {@link ChannelPipeline}.
+     *
+     * Sub-classes may override this method to change behavior.
+     */
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
+            throws Exception {
+        ctx.fireExceptionCaught(cause);
     }
 }

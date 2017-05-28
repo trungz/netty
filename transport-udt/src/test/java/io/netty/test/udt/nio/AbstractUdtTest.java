@@ -16,12 +16,10 @@
 
 package io.netty.test.udt.nio;
 
-import static org.junit.Assume.*;
 import io.netty.test.udt.util.UnitHelp;
-
 import org.junit.BeforeClass;
 
-import com.barchart.udt.SocketUDT;
+import static org.junit.Assume.*;
 
 /**
  * Base for UDT tests.
@@ -32,7 +30,7 @@ public abstract class AbstractUdtTest {
      * UDT test assumptions.
      */
     @BeforeClass
-    public static void assumeConditions(){
+    public static void assumeConditions() {
         assumeTrue(UnitHelp.canLoadAndInitClass("com.barchart.udt.SocketUDT"));
     }
 

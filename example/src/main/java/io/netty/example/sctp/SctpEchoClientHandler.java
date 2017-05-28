@@ -16,35 +16,25 @@
 package io.netty.example.sctp;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.MessageBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundMessageHandlerAdapter;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.sctp.SctpMessage;
-
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Handler implementation for the SCTP echo client.  It initiates the ping-pong
  * traffic between the echo client and server by sending the first message to
  * the server.
  */
-public class SctpEchoClientHandler extends ChannelInboundMessageHandlerAdapter<SctpMessage> {
-
-    private static final Logger logger = Logger.getLogger(
-            SctpEchoClientHandler.class.getName());
+public class SctpEchoClientHandler extends ChannelInboundHandlerAdapter {
 
     private final ByteBuf firstMessage;
 
     /**
      * Creates a client-side handler.
      */
-    public SctpEchoClientHandler(int firstMessageSize) {
-        if (firstMessageSize <= 0) {
-            throw new IllegalArgumentException("firstMessageSize: " + firstMessageSize);
-        }
-        firstMessage = Unpooled.buffer(firstMessageSize);
+    public SctpEchoClientHandler() {
+        firstMessage = Unpooled.buffer(SctpEchoClient.SIZE);
         for (int i = 0; i < firstMessage.capacity(); i++) {
             firstMessage.writeByte((byte) i);
         }
@@ -52,20 +42,23 @@ public class SctpEchoClientHandler extends ChannelInboundMessageHandlerAdapter<S
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
-        ctx.write(new SctpMessage(0, 0, firstMessage));
+        ctx.writeAndFlush(new SctpMessage(0, 0, firstMessage));
     }
 
     @Override
-    public void messageReceived(ChannelHandlerContext ctx, SctpMessage msg) throws Exception {
-        MessageBuf<Object> out = ctx.nextOutboundMessageBuffer();
-        out.add(msg);
+    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        ctx.write(msg);
+    }
+
+    @Override
+    public void channelReadComplete(ChannelHandlerContext ctx) {
         ctx.flush();
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         // Close the connection when an exception is raised.
-        logger.log(Level.WARNING, "Unexpected exception from downstream.", cause);
+        cause.printStackTrace();
         ctx.close();
     }
 }

@@ -16,12 +16,14 @@
 package io.netty.handler.stream;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
+import io.netty.channel.ChannelHandlerContext;
 
 import java.io.InputStream;
 import java.io.PushbackInputStream;
 
 /**
- * A {@link ChunkedByteInput} that fetches data from an {@link InputStream} chunk by
+ * A {@link ChunkedInput} that fetches data from an {@link InputStream} chunk by
  * chunk.
  * <p>
  * Please note that the {@link InputStream} instance that feeds data into
@@ -30,13 +32,14 @@ import java.io.PushbackInputStream;
  * Otherwise, {@link ChunkedStream} will generate many too small chunks or
  * block unnecessarily often.
  */
-public class ChunkedStream implements ChunkedByteInput {
+public class ChunkedStream implements ChunkedInput<ByteBuf> {
 
     static final int DEFAULT_CHUNK_SIZE = 8192;
 
     private final PushbackInputStream in;
     private final int chunkSize;
     private long offset;
+    private boolean closed;
 
     /**
      * Creates a new instance that fetches data from the specified stream.
@@ -49,7 +52,7 @@ public class ChunkedStream implements ChunkedByteInput {
      * Creates a new instance that fetches data from the specified stream.
      *
      * @param chunkSize the number of bytes to fetch on each
-     *                  {@link #readChunk(ByteBuf)} call
+     *                  {@link #readChunk(ChannelHandlerContext)} call
      */
     public ChunkedStream(InputStream in, int chunkSize) {
         if (in == null) {
@@ -78,6 +81,10 @@ public class ChunkedStream implements ChunkedByteInput {
 
     @Override
     public boolean isEndOfInput() throws Exception {
+        if (closed) {
+            return true;
+        }
+
         int b = in.read();
         if (b < 0) {
             return true;
@@ -89,13 +96,20 @@ public class ChunkedStream implements ChunkedByteInput {
 
     @Override
     public void close() throws Exception {
+        closed = true;
         in.close();
     }
 
+    @Deprecated
     @Override
-    public boolean readChunk(ByteBuf buffer) throws Exception {
+    public ByteBuf readChunk(ChannelHandlerContext ctx) throws Exception {
+        return readChunk(ctx.alloc());
+    }
+
+    @Override
+    public ByteBuf readChunk(ByteBufAllocator allocator) throws Exception {
         if (isEndOfInput()) {
-            return false;
+            return null;
         }
 
         final int availableBytes = in.available();
@@ -106,8 +120,27 @@ public class ChunkedStream implements ChunkedByteInput {
             chunkSize = Math.min(this.chunkSize, in.available());
         }
 
-        // transfer to buffer
-        offset += buffer.writeBytes(in, chunkSize);
-        return true;
+        boolean release = true;
+        ByteBuf buffer = allocator.buffer(chunkSize);
+        try {
+            // transfer to buffer
+            offset += buffer.writeBytes(in, chunkSize);
+            release = false;
+            return buffer;
+        } finally {
+            if (release) {
+                buffer.release();
+            }
+        }
+    }
+
+    @Override
+    public long length() {
+        return -1;
+    }
+
+    @Override
+    public long progress() {
+        return offset;
     }
 }

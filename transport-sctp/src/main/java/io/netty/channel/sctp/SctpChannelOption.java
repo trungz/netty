@@ -15,46 +15,34 @@
  */
 package io.netty.channel.sctp;
 
+import com.sun.nio.sctp.SctpStandardSocketOptions.InitMaxStreams;
 import io.netty.channel.ChannelOption;
 
 import java.net.SocketAddress;
-import java.util.List;
 
 /**
  * Option for configuring the SCTP transport
  */
-public class SctpChannelOption<T> extends ChannelOption<T> {
-    public static final SctpChannelOption<Boolean> SCTP_DISABLE_FRAGMENTS =
-            new SctpChannelOption<Boolean>("SCTP_DISABLE_FRAGMENTS");
-    public static final SctpChannelOption<Boolean> SCTP_EXPLICIT_COMPLETE =
-            new SctpChannelOption<Boolean>("SCTP_EXPLICIT_COMPLETE");
-    public static final SctpChannelOption<Integer> SCTP_FRAGMENT_INTERLEAVE =
-            new SctpChannelOption<Integer>("SCTP_FRAGMENT_INTERLEAVE");
-    public static final SctpChannelOption<List<Integer>> SCTP_INIT_MAXSTREAMS =
-            new SctpChannelOption<List<Integer>>("SCTP_INIT_MAXSTREAMS") {
-                @Override
-                public void validate(List<Integer> value) {
-                    super.validate(value);
-                    if (value.size() != 2) {
-                        throw new IllegalArgumentException("value must be a List of 2 Integers: " + value);
-                    }
-                    if (value.get(0) == null) {
-                        throw new NullPointerException("value[0]");
-                    }
-                    if (value.get(1) == null) {
-                        throw new NullPointerException("value[1]");
-                    }
-                }
-            };
+public final class SctpChannelOption<T> extends ChannelOption<T> {
 
-    public static final SctpChannelOption<Boolean> SCTP_NODELAY =
-            new SctpChannelOption<Boolean>("SCTP_NODELAY");
-    public static final SctpChannelOption<SocketAddress> SCTP_PRIMARY_ADDR =
-            new SctpChannelOption<SocketAddress>("SCTP_PRIMARY_ADDR");
-    public static final SctpChannelOption<SocketAddress> SCTP_SET_PEER_PRIMARY_ADDR =
-            new SctpChannelOption<SocketAddress>("SCTP_SET_PEER_PRIMARY_ADDR");
+    public static final ChannelOption<Boolean> SCTP_DISABLE_FRAGMENTS =
+            valueOf(SctpChannelOption.class, "SCTP_DISABLE_FRAGMENTS");
+    public static final ChannelOption<Boolean> SCTP_EXPLICIT_COMPLETE =
+            valueOf(SctpChannelOption.class, "SCTP_EXPLICIT_COMPLETE");
+    public static final ChannelOption<Integer> SCTP_FRAGMENT_INTERLEAVE =
+            valueOf(SctpChannelOption.class, "SCTP_FRAGMENT_INTERLEAVE");
+    public static final ChannelOption<InitMaxStreams> SCTP_INIT_MAXSTREAMS =
+            valueOf(SctpChannelOption.class, "SCTP_INIT_MAXSTREAMS");
 
-    protected SctpChannelOption(String name) {
-        super(name);
+    public static final ChannelOption<Boolean> SCTP_NODELAY =
+            valueOf(SctpChannelOption.class, "SCTP_NODELAY");
+    public static final ChannelOption<SocketAddress> SCTP_PRIMARY_ADDR =
+            valueOf(SctpChannelOption.class, "SCTP_PRIMARY_ADDR");
+    public static final ChannelOption<SocketAddress> SCTP_SET_PEER_PRIMARY_ADDR =
+            valueOf(SctpChannelOption.class, "SCTP_SET_PEER_PRIMARY_ADDR");
+
+    @SuppressWarnings({ "unused", "deprecation" })
+    private SctpChannelOption() {
+        super(null);
     }
 }

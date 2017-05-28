@@ -16,16 +16,18 @@
 package io.netty.channel.sctp;
 
 import com.sun.nio.sctp.SctpServerChannel;
+import com.sun.nio.sctp.SctpStandardSocketOptions;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.DefaultChannelConfig;
+import io.netty.channel.MessageSizeEstimator;
+import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
 import io.netty.util.NetUtil;
 
 import java.io.IOException;
 import java.util.Map;
-
-import static com.sun.nio.sctp.SctpStandardSocketOptions.*;
 
 /**
  * The default {@link SctpServerChannelConfig} implementation for SCTP.
@@ -63,6 +65,9 @@ public class DefaultSctpServerChannelConfig extends DefaultChannelConfig impleme
         if (option == ChannelOption.SO_SNDBUF) {
             return (T) Integer.valueOf(getSendBufferSize());
         }
+        if (option == SctpChannelOption.SCTP_INIT_MAXSTREAMS) {
+            return (T) getInitMaxStreams();
+        }
         return super.getOption(option);
     }
 
@@ -74,8 +79,8 @@ public class DefaultSctpServerChannelConfig extends DefaultChannelConfig impleme
             setReceiveBufferSize((Integer) value);
         } else if (option == ChannelOption.SO_SNDBUF) {
             setSendBufferSize((Integer) value);
-        } else if (option == SCTP_INIT_MAXSTREAMS) {
-            setInitMaxStreams((InitMaxStreams) value);
+        } else if (option == SctpChannelOption.SCTP_INIT_MAXSTREAMS) {
+            setInitMaxStreams((SctpStandardSocketOptions.InitMaxStreams) value);
         } else {
             return super.setOption(option, value);
         }
@@ -86,7 +91,7 @@ public class DefaultSctpServerChannelConfig extends DefaultChannelConfig impleme
     @Override
     public int getSendBufferSize() {
         try {
-            return javaChannel.getOption(SO_SNDBUF);
+            return javaChannel.getOption(SctpStandardSocketOptions.SO_SNDBUF);
         } catch (IOException e) {
             throw new ChannelException(e);
         }
@@ -95,7 +100,7 @@ public class DefaultSctpServerChannelConfig extends DefaultChannelConfig impleme
     @Override
     public SctpServerChannelConfig setSendBufferSize(int sendBufferSize) {
         try {
-            javaChannel.setOption(SO_SNDBUF, sendBufferSize);
+            javaChannel.setOption(SctpStandardSocketOptions.SO_SNDBUF, sendBufferSize);
         } catch (IOException e) {
             throw new ChannelException(e);
         }
@@ -105,7 +110,7 @@ public class DefaultSctpServerChannelConfig extends DefaultChannelConfig impleme
     @Override
     public int getReceiveBufferSize() {
         try {
-            return javaChannel.getOption(SO_RCVBUF);
+            return javaChannel.getOption(SctpStandardSocketOptions.SO_RCVBUF);
         } catch (IOException e) {
             throw new ChannelException(e);
         }
@@ -114,7 +119,7 @@ public class DefaultSctpServerChannelConfig extends DefaultChannelConfig impleme
     @Override
     public SctpServerChannelConfig setReceiveBufferSize(int receiveBufferSize) {
         try {
-            javaChannel.setOption(SO_RCVBUF, receiveBufferSize);
+            javaChannel.setOption(SctpStandardSocketOptions.SO_RCVBUF, receiveBufferSize);
         } catch (IOException e) {
             throw new ChannelException(e);
         }
@@ -122,18 +127,18 @@ public class DefaultSctpServerChannelConfig extends DefaultChannelConfig impleme
     }
 
     @Override
-    public InitMaxStreams getInitMaxStreams() {
+    public SctpStandardSocketOptions.InitMaxStreams getInitMaxStreams() {
         try {
-            return javaChannel.getOption(SCTP_INIT_MAXSTREAMS);
+            return javaChannel.getOption(SctpStandardSocketOptions.SCTP_INIT_MAXSTREAMS);
         } catch (IOException e) {
             throw new ChannelException(e);
         }
     }
 
     @Override
-    public SctpServerChannelConfig setInitMaxStreams(InitMaxStreams initMaxStreams) {
+    public SctpServerChannelConfig setInitMaxStreams(SctpStandardSocketOptions.InitMaxStreams initMaxStreams) {
         try {
-            javaChannel.setOption(SCTP_INIT_MAXSTREAMS, initMaxStreams);
+            javaChannel.setOption(SctpStandardSocketOptions.SCTP_INIT_MAXSTREAMS, initMaxStreams);
         } catch (IOException e) {
             throw new ChannelException(e);
         }
@@ -155,22 +160,69 @@ public class DefaultSctpServerChannelConfig extends DefaultChannelConfig impleme
     }
 
     @Override
+    @Deprecated
+    public SctpServerChannelConfig setMaxMessagesPerRead(int maxMessagesPerRead) {
+        super.setMaxMessagesPerRead(maxMessagesPerRead);
+        return this;
+    }
+
+    @Override
     public SctpServerChannelConfig setWriteSpinCount(int writeSpinCount) {
-        return (SctpServerChannelConfig) super.setWriteSpinCount(writeSpinCount);
+        super.setWriteSpinCount(writeSpinCount);
+        return this;
     }
 
     @Override
     public SctpServerChannelConfig setConnectTimeoutMillis(int connectTimeoutMillis) {
-        return (SctpServerChannelConfig) super.setConnectTimeoutMillis(connectTimeoutMillis);
+        super.setConnectTimeoutMillis(connectTimeoutMillis);
+        return this;
     }
 
     @Override
     public SctpServerChannelConfig setAllocator(ByteBufAllocator allocator) {
-        return (SctpServerChannelConfig) super.setAllocator(allocator);
+        super.setAllocator(allocator);
+        return this;
+    }
+
+    @Override
+    public SctpServerChannelConfig setRecvByteBufAllocator(RecvByteBufAllocator allocator) {
+        super.setRecvByteBufAllocator(allocator);
+        return this;
     }
 
     @Override
     public SctpServerChannelConfig setAutoRead(boolean autoRead) {
-        return (SctpServerChannelConfig) super.setAutoRead(autoRead);
+        super.setAutoRead(autoRead);
+        return this;
+    }
+
+    @Override
+    public SctpServerChannelConfig setAutoClose(boolean autoClose) {
+        super.setAutoClose(autoClose);
+        return this;
+    }
+
+    @Override
+    public SctpServerChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark) {
+        super.setWriteBufferLowWaterMark(writeBufferLowWaterMark);
+        return this;
+    }
+
+    @Override
+    public SctpServerChannelConfig setWriteBufferHighWaterMark(int writeBufferHighWaterMark) {
+        super.setWriteBufferHighWaterMark(writeBufferHighWaterMark);
+        return this;
+    }
+
+    @Override
+    public SctpServerChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark) {
+        super.setWriteBufferWaterMark(writeBufferWaterMark);
+        return this;
+    }
+
+    @Override
+    public SctpServerChannelConfig setMessageSizeEstimator(MessageSizeEstimator estimator) {
+        super.setMessageSizeEstimator(estimator);
+        return this;
     }
 }

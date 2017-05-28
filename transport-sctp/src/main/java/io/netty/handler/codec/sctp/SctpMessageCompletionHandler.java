@@ -19,80 +19,53 @@ package io.netty.handler.codec.sctp;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundMessageHandler;
-import io.netty.channel.ChannelInboundMessageHandlerAdapter;
+import io.netty.channel.ChannelInboundHandler;
 import io.netty.channel.sctp.SctpMessage;
+import io.netty.handler.codec.MessageToMessageDecoder;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * {@link ChannelInboundMessageHandlerAdapter} which will take care of handle fragmented {@link SctpMessage}s, so
+ * {@link MessageToMessageDecoder} which will take care of handle fragmented {@link SctpMessage}s, so
  * only <strong>complete</strong> {@link SctpMessage}s will be forwarded to the next
- * {@link ChannelInboundMessageHandler}.
+ * {@link ChannelInboundHandler}.
  */
-public class SctpMessageCompletionHandler extends ChannelInboundMessageHandlerAdapter<SctpMessage> {
+public class SctpMessageCompletionHandler extends MessageToMessageDecoder<SctpMessage> {
     private final Map<Integer, ByteBuf> fragments = new HashMap<Integer, ByteBuf>();
-    private boolean assembled;
 
     @Override
-    protected boolean beginMessageReceived(ChannelHandlerContext ctx) throws Exception {
-        assembled = false;
-        return super.beginMessageReceived(ctx);
-    }
-
-    @Override
-    protected void endMessageReceived(ChannelHandlerContext ctx) throws Exception {
-        if (assembled) {
-            assembled = false;
-            ctx.fireInboundBufferUpdated();
-        }
-        super.endMessageReceived(ctx);
-    }
-
-    @Override
-    protected void messageReceived(ChannelHandlerContext ctx, SctpMessage msg) throws Exception {
-
-        final ByteBuf byteBuf = msg.data();
+    protected void decode(ChannelHandlerContext ctx, SctpMessage msg, List<Object> out) throws Exception {
+        final ByteBuf byteBuf = msg.content();
         final int protocolIdentifier = msg.protocolIdentifier();
         final int streamIdentifier = msg.streamIdentifier();
         final boolean isComplete = msg.isComplete();
+        final boolean isUnordered = msg.isUnordered();
 
-        ByteBuf frag;
-
-        if (fragments.containsKey(streamIdentifier)) {
-            frag = fragments.remove(streamIdentifier);
-        } else {
+        ByteBuf frag = fragments.remove(streamIdentifier);
+        if (frag == null) {
             frag = Unpooled.EMPTY_BUFFER;
         }
 
         if (isComplete && !frag.isReadable()) {
             //data chunk is not fragmented
-            handleAssembledMessage(ctx, msg);
+            out.add(msg);
         } else if (!isComplete && frag.isReadable()) {
             //more message to complete
             fragments.put(streamIdentifier, Unpooled.wrappedBuffer(frag, byteBuf));
         } else if (isComplete && frag.isReadable()) {
             //last message to complete
-            fragments.remove(streamIdentifier);
             SctpMessage assembledMsg = new SctpMessage(
                     protocolIdentifier,
                     streamIdentifier,
+                    isUnordered,
                     Unpooled.wrappedBuffer(frag, byteBuf));
-            handleAssembledMessage(ctx, assembledMsg);
+            out.add(assembledMsg);
         } else {
             //first incomplete message
             fragments.put(streamIdentifier, byteBuf);
         }
-    }
-
-    private void handleAssembledMessage(ChannelHandlerContext ctx, SctpMessage assembledMsg) {
-        ctx.nextInboundMessageBuffer().add(assembledMsg);
-        assembled = true;
-    }
-
-    @Override
-    protected void freeInboundMessage(SctpMessage msg) throws Exception {
-        // It is an aggregator so not free it yet
+        byteBuf.retain();
     }
 }

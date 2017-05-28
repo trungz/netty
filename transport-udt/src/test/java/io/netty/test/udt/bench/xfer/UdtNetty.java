@@ -22,16 +22,17 @@ import com.yammer.metrics.core.Meter;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler;
-import io.netty.test.udt.util.BootHelp;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.udt.nio.NioUdtProvider;
 import io.netty.test.udt.util.CustomReporter;
 import io.netty.test.udt.util.EchoMessageHandler;
 import io.netty.test.udt.util.TrafficControl;
 import io.netty.test.udt.util.UnitHelp;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.net.InetSocketAddress;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -43,7 +44,7 @@ public final class UdtNetty {
     private UdtNetty() {
     }
 
-    static final Logger log = LoggerFactory.getLogger(UdtNetty.class);
+    static final InternalLogger log = InternalLoggerFactory.getInstance(UdtNetty.class);
 
     /** benchmark duration */
     static final int time = 10 * 60 * 1000;
@@ -91,10 +92,20 @@ public final class UdtNetty {
         final ChannelHandler handler1 = new EchoMessageHandler(rate, size);
         final ChannelHandler handler2 = new EchoMessageHandler(null, size);
 
-        final Bootstrap peerBoot1 = BootHelp.messagePeerBoot(addr1, addr2,
-                handler1);
-        final Bootstrap peerBoot2 = BootHelp.messagePeerBoot(addr2, addr1,
-                handler2);
+        final NioEventLoopGroup group1 = new NioEventLoopGroup(
+                1, Executors.defaultThreadFactory(), NioUdtProvider.MESSAGE_PROVIDER);
+        final NioEventLoopGroup group2 = new NioEventLoopGroup(
+                1, Executors.defaultThreadFactory(), NioUdtProvider.MESSAGE_PROVIDER);
+
+        final Bootstrap peerBoot1 = new Bootstrap();
+        peerBoot1.group(group1)
+                 .channelFactory(NioUdtProvider.MESSAGE_RENDEZVOUS)
+                 .localAddress(addr1).remoteAddress(addr2).handler(handler1);
+
+        final Bootstrap peerBoot2 = new Bootstrap();
+        peerBoot2.group(group2)
+                 .channelFactory(NioUdtProvider.MESSAGE_RENDEZVOUS)
+                 .localAddress(addr2).remoteAddress(addr1).handler(handler2);
 
         final ChannelFuture peerFuture1 = peerBoot1.connect();
         final ChannelFuture peerFuture2 = peerBoot2.connect();
@@ -112,8 +123,8 @@ public final class UdtNetty {
 
         Thread.sleep(1000);
 
-        peerBoot1.shutdown();
-        peerBoot2.shutdown();
+        group1.shutdownGracefully();
+        group2.shutdownGracefully();
 
         Metrics.defaultRegistry().shutdown();
 

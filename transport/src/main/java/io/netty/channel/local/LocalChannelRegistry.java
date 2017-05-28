@@ -17,15 +17,15 @@ package io.netty.channel.local;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelException;
+import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.StringUtil;
 
 import java.net.SocketAddress;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 final class LocalChannelRegistry {
 
-    private static final ConcurrentMap<LocalAddress, Channel> boundChannels =
-            new ConcurrentHashMap<LocalAddress, Channel>();
+    private static final ConcurrentMap<LocalAddress, Channel> boundChannels = PlatformDependent.newConcurrentHashMap();
 
     static LocalAddress register(
             Channel channel, LocalAddress oldLocalAddress, SocketAddress localAddress) {
@@ -33,8 +33,7 @@ final class LocalChannelRegistry {
             throw new ChannelException("already bound");
         }
         if (!(localAddress instanceof LocalAddress)) {
-            throw new ChannelException(
-                    "unsupported address type: " + localAddress.getClass().getSimpleName());
+            throw new ChannelException("unsupported address type: " + StringUtil.simpleClassName(localAddress));
         }
 
         LocalAddress addr = (LocalAddress) localAddress;

@@ -23,11 +23,11 @@ import com.barchart.udt.nio.RendezvousChannelUDT;
 import com.barchart.udt.nio.SelectorProviderUDT;
 import com.barchart.udt.nio.ServerSocketChannelUDT;
 import com.barchart.udt.nio.SocketChannelUDT;
-import io.netty.bootstrap.ChannelFactory;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelException;
-import io.netty.channel.udt.UdtServerChannel;
+import io.netty.channel.ChannelFactory;
 import io.netty.channel.udt.UdtChannel;
+import io.netty.channel.udt.UdtServerChannel;
 
 import java.io.IOException;
 import java.nio.channels.spi.SelectorProvider;
@@ -38,7 +38,10 @@ import java.nio.channels.spi.SelectorProvider;
  * Provides {@link ChannelFactory} for UDT channels.
  * <p>
  * Provides {@link SelectorProvider} for UDT channels.
+ *
+ * @deprecated The UDT transport is no longer maintained and will be removed.
  */
+@Deprecated
 public final class NioUdtProvider<T extends UdtChannel> implements ChannelFactory<T> {
 
     /**
@@ -106,57 +109,59 @@ public final class NioUdtProvider<T extends UdtChannel> implements ChannelFactor
         if (channel instanceof NioUdtByteAcceptorChannel) {
             return ((NioUdtByteAcceptorChannel) channel).javaChannel();
         }
-        if (channel instanceof NioUdtByteConnectorChannel) {
-            return ((NioUdtByteConnectorChannel) channel).javaChannel();
-        }
         if (channel instanceof NioUdtByteRendezvousChannel) {
             return ((NioUdtByteRendezvousChannel) channel).javaChannel();
         }
+        if (channel instanceof NioUdtByteConnectorChannel) {
+            return ((NioUdtByteConnectorChannel) channel).javaChannel();
+        }
+
         // message
         if (channel instanceof NioUdtMessageAcceptorChannel) {
             return ((NioUdtMessageAcceptorChannel) channel).javaChannel();
         }
-        if (channel instanceof NioUdtMessageConnectorChannel) {
-            return ((NioUdtMessageConnectorChannel) channel).javaChannel();
-        }
         if (channel instanceof NioUdtMessageRendezvousChannel) {
             return ((NioUdtMessageRendezvousChannel) channel).javaChannel();
         }
+        if (channel instanceof NioUdtMessageConnectorChannel) {
+            return ((NioUdtMessageConnectorChannel) channel).javaChannel();
+        }
+
         return null;
     }
 
     /**
      * Convenience factory for {@link KindUDT#ACCEPTOR} channels.
      */
-    protected static ServerSocketChannelUDT newAcceptorChannelUDT(
+    static ServerSocketChannelUDT newAcceptorChannelUDT(
             final TypeUDT type) {
         try {
             return SelectorProviderUDT.from(type).openServerSocketChannel();
         } catch (final IOException e) {
-            throw new ChannelException("Failed to open channel");
+            throw new ChannelException("failed to open a server socket channel", e);
         }
     }
 
     /**
      * Convenience factory for {@link KindUDT#CONNECTOR} channels.
      */
-    protected static SocketChannelUDT newConnectorChannelUDT(final TypeUDT type) {
+    static SocketChannelUDT newConnectorChannelUDT(final TypeUDT type) {
         try {
             return SelectorProviderUDT.from(type).openSocketChannel();
         } catch (final IOException e) {
-            throw new ChannelException("Failed to open channel");
+            throw new ChannelException("failed to open a socket channel", e);
         }
     }
 
     /**
      * Convenience factory for {@link KindUDT#RENDEZVOUS} channels.
      */
-    protected static RendezvousChannelUDT newRendezvousChannelUDT(
+    static RendezvousChannelUDT newRendezvousChannelUDT(
             final TypeUDT type) {
         try {
             return SelectorProviderUDT.from(type).openRendezvousChannel();
         } catch (final IOException e) {
-            throw new ChannelException("Failed to open channel");
+            throw new ChannelException("failed to open a rendezvous channel", e);
         }
     }
 
@@ -201,35 +206,35 @@ public final class NioUdtProvider<T extends UdtChannel> implements ChannelFactor
     @Override
     public T newChannel() {
         switch (kind) {
-        case ACCEPTOR:
-            switch (type) {
-            case DATAGRAM:
-                return (T) new NioUdtMessageAcceptorChannel();
-            case STREAM:
-                return (T) new NioUdtByteAcceptorChannel();
+            case ACCEPTOR:
+                switch (type) {
+                    case DATAGRAM:
+                        return (T) new NioUdtMessageAcceptorChannel();
+                    case STREAM:
+                        return (T) new NioUdtByteAcceptorChannel();
+                    default:
+                        throw new IllegalStateException("wrong type=" + type);
+                }
+            case CONNECTOR:
+                switch (type) {
+                    case DATAGRAM:
+                        return (T) new NioUdtMessageConnectorChannel();
+                    case STREAM:
+                        return (T) new NioUdtByteConnectorChannel();
+                    default:
+                        throw new IllegalStateException("wrong type=" + type);
+                }
+            case RENDEZVOUS:
+                switch (type) {
+                    case DATAGRAM:
+                        return (T) new NioUdtMessageRendezvousChannel();
+                    case STREAM:
+                        return (T) new NioUdtByteRendezvousChannel();
+                    default:
+                        throw new IllegalStateException("wrong type=" + type);
+                }
             default:
-                throw new IllegalStateException("wrong type=" + type);
-            }
-        case CONNECTOR:
-            switch (type) {
-            case DATAGRAM:
-                return (T) new NioUdtMessageConnectorChannel();
-            case STREAM:
-                return (T) new NioUdtByteConnectorChannel();
-            default:
-                throw new IllegalStateException("wrong type=" + type);
-            }
-        case RENDEZVOUS:
-            switch (type) {
-            case DATAGRAM:
-                return (T) new NioUdtMessageRendezvousChannel();
-            case STREAM:
-                return (T) new NioUdtByteRendezvousChannel();
-            default:
-                throw new IllegalStateException("wrong type=" + type);
-            }
-        default:
-            throw new IllegalStateException("wrong kind=" + kind);
+                throw new IllegalStateException("wrong kind=" + kind);
         }
     }
 
@@ -239,5 +244,4 @@ public final class NioUdtProvider<T extends UdtChannel> implements ChannelFactor
     public TypeUDT type() {
         return type;
     }
-
 }

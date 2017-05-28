@@ -20,9 +20,10 @@ import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
+import io.netty.channel.DefaultEventLoopGroup;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.local.LocalAddress;
 import io.netty.channel.local.LocalChannel;
-import io.netty.channel.local.LocalEventLoopGroup;
 import io.netty.channel.local.LocalServerChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.handler.logging.LogLevel;
@@ -31,25 +32,22 @@ import io.netty.handler.logging.LoggingHandler;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 
-public class LocalEcho {
+public final class LocalEcho {
 
-    private final String port;
+    static final String PORT = System.getProperty("port", "test_port");
 
-    public LocalEcho(String port) {
-        this.port = port;
-    }
-
-    public void run() throws Exception {
+    public static void main(String[] args) throws Exception {
         // Address to bind on / connect to.
-        final LocalAddress addr = new LocalAddress(port);
+        final LocalAddress addr = new LocalAddress(PORT);
 
-        Bootstrap cb = new Bootstrap();
-        ServerBootstrap sb = new ServerBootstrap();
+        EventLoopGroup serverGroup = new DefaultEventLoopGroup();
+        EventLoopGroup clientGroup = new NioEventLoopGroup(); // NIO event loops are also OK
         try {
             // Note that we can use any event loop to ensure certain local channels
             // are handled by the same event loop thread which drives a certain socket channel
             // to reduce the communication latency between socket channels and local channels.
-            sb.group(new LocalEventLoopGroup())
+            ServerBootstrap sb = new ServerBootstrap();
+            sb.group(serverGroup)
               .channel(LocalServerChannel.class)
               .handler(new ChannelInitializer<LocalServerChannel>() {
                   @Override
@@ -66,7 +64,8 @@ public class LocalEcho {
                   }
               });
 
-            cb.group(new NioEventLoopGroup()) // NIO event loops are also OK
+            Bootstrap cb = new Bootstrap();
+            cb.group(clientGroup)
               .channel(LocalChannel.class)
               .handler(new ChannelInitializer<LocalChannel>() {
                   @Override
@@ -94,7 +93,7 @@ public class LocalEcho {
                 }
 
                 // Sends the received line to the server.
-                lastWriteFuture = ch.write(line);
+                lastWriteFuture = ch.writeAndFlush(line);
             }
 
             // Wait until all messages are flushed before closing the channel.
@@ -102,12 +101,8 @@ public class LocalEcho {
                 lastWriteFuture.awaitUninterruptibly();
             }
         } finally {
-            sb.shutdown();
-            cb.shutdown();
+            serverGroup.shutdownGracefully();
+            clientGroup.shutdownGracefully();
         }
-    }
-
-    public static void main(String[] args) throws Exception {
-        new LocalEcho("1").run();
     }
 }

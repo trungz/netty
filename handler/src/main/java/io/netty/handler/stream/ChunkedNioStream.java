@@ -16,16 +16,18 @@
 package io.netty.handler.stream;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
+import io.netty.channel.ChannelHandlerContext;
 
 import java.nio.ByteBuffer;
 import java.nio.channels.ReadableByteChannel;
 
 /**
- * A {@link ChunkedByteInput} that fetches data from a {@link ReadableByteChannel}
+ * A {@link ChunkedInput} that fetches data from a {@link ReadableByteChannel}
  * chunk by chunk.  Please note that the {@link ReadableByteChannel} must
  * operate in blocking mode.  Non-blocking mode channels are not supported.
  */
-public class ChunkedNioStream implements ChunkedByteInput {
+public class ChunkedNioStream implements ChunkedInput<ByteBuf> {
 
     private final ReadableByteChannel in;
 
@@ -48,7 +50,7 @@ public class ChunkedNioStream implements ChunkedByteInput {
      * Creates a new instance that fetches data from the specified channel.
      *
      * @param chunkSize the number of bytes to fetch on each
-     *                  {@link #readChunk(ByteBuf)} call
+     *                  {@link #readChunk(ChannelHandlerContext)} call
      */
     public ChunkedNioStream(ReadableByteChannel in, int chunkSize) {
         if (in == null) {
@@ -95,10 +97,16 @@ public class ChunkedNioStream implements ChunkedByteInput {
         in.close();
     }
 
+    @Deprecated
     @Override
-    public boolean readChunk(ByteBuf buffer) throws Exception {
+    public ByteBuf readChunk(ChannelHandlerContext ctx) throws Exception {
+        return readChunk(ctx.alloc());
+    }
+
+    @Override
+    public ByteBuf readChunk(ByteBufAllocator allocator) throws Exception {
         if (isEndOfInput()) {
-            return false;
+            return null;
         }
         // buffer cannot be not be empty from there
         int readBytes = byteBuffer.position();
@@ -114,9 +122,27 @@ public class ChunkedNioStream implements ChunkedByteInput {
             }
         }
         byteBuffer.flip();
-        buffer.writeBytes(byteBuffer);
-        byteBuffer.clear();
+        boolean release = true;
+        ByteBuf buffer = allocator.buffer(byteBuffer.remaining());
+        try {
+            buffer.writeBytes(byteBuffer);
+            byteBuffer.clear();
+            release = false;
+            return buffer;
+        } finally {
+            if (release) {
+                buffer.release();
+            }
+        }
+    }
 
-        return true;
+    @Override
+    public long length() {
+        return -1;
+    }
+
+    @Override
+    public long progress() {
+        return offset;
     }
 }

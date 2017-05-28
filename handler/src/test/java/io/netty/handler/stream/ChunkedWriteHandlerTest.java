@@ -16,12 +16,12 @@
 package io.netty.handler.stream;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.MessageBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.embedded.EmbeddedByteChannel;
-import io.netty.channel.embedded.EmbeddedMessageChannel;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.CharsetUtil;
 import org.junit.Test;
 
@@ -32,7 +32,9 @@ import java.io.IOException;
 import java.nio.channels.Channels;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 public class ChunkedWriteHandlerTest {
     private static final byte[] BYTES = new byte[1024 * 64];
@@ -68,18 +70,19 @@ public class ChunkedWriteHandlerTest {
     public void testChunkedStream() {
         check(new ChunkedStream(new ByteArrayInputStream(BYTES)));
 
-        check(new ChunkedStream(new ByteArrayInputStream(BYTES)), new ChunkedStream(new ByteArrayInputStream(BYTES)), new ChunkedStream(new ByteArrayInputStream(BYTES)));
-
+        check(new ChunkedStream(new ByteArrayInputStream(BYTES)),
+                new ChunkedStream(new ByteArrayInputStream(BYTES)),
+                new ChunkedStream(new ByteArrayInputStream(BYTES)));
     }
 
     @Test
     public void testChunkedNioStream() {
         check(new ChunkedNioStream(Channels.newChannel(new ByteArrayInputStream(BYTES))));
 
-        check(new ChunkedNioStream(Channels.newChannel(new ByteArrayInputStream(BYTES))), new ChunkedNioStream(Channels.newChannel(new ByteArrayInputStream(BYTES))), new ChunkedNioStream(Channels.newChannel(new ByteArrayInputStream(BYTES))));
-
+        check(new ChunkedNioStream(Channels.newChannel(new ByteArrayInputStream(BYTES))),
+                new ChunkedNioStream(Channels.newChannel(new ByteArrayInputStream(BYTES))),
+                new ChunkedNioStream(Channels.newChannel(new ByteArrayInputStream(BYTES))));
     }
-
 
     @Test
     public void testChunkedFile() throws IOException {
@@ -95,13 +98,20 @@ public class ChunkedWriteHandlerTest {
         check(new ChunkedNioFile(TMP), new ChunkedNioFile(TMP), new ChunkedNioFile(TMP));
     }
 
+    @Test
+    public void testUnchunkedData() throws IOException {
+        check(Unpooled.wrappedBuffer(BYTES));
+
+        check(Unpooled.wrappedBuffer(BYTES), Unpooled.wrappedBuffer(BYTES), Unpooled.wrappedBuffer(BYTES));
+    }
+
     // Test case which shows that there is not a bug like stated here:
-    // http://stackoverflow.com/questions/10409241/why-is-close-channelfuturelistener-not-notified/10426305#comment14126161_10426305
+    // http://stackoverflow.com/a/10426305
     @Test
     public void testListenerNotifiedWhenIsEnd() {
         ByteBuf buffer = Unpooled.copiedBuffer("Test", CharsetUtil.ISO_8859_1);
 
-        ChunkedByteInput input = new ChunkedByteInput() {
+        ChunkedInput<ByteBuf> input = new ChunkedInput<ByteBuf>() {
             private boolean done;
             private final ByteBuf buffer = Unpooled.copiedBuffer("Test", CharsetUtil.ISO_8859_1);
 
@@ -112,17 +122,32 @@ public class ChunkedWriteHandlerTest {
 
             @Override
             public void close() throws Exception {
-                // NOOP
+                buffer.release();
+            }
+
+            @Deprecated
+            @Override
+            public ByteBuf readChunk(ChannelHandlerContext ctx) throws Exception {
+                return readChunk(ctx.alloc());
             }
 
             @Override
-            public boolean readChunk(ByteBuf buffer) throws Exception {
+            public ByteBuf readChunk(ByteBufAllocator allocator) throws Exception {
                 if (done) {
-                    return false;
+                    return null;
                 }
                 done = true;
-                buffer.writeBytes(this.buffer.duplicate());
-                return true;
+                return buffer.retainedDuplicate();
+            }
+
+            @Override
+            public long length() {
+                return -1;
+            }
+
+            @Override
+            public long progress() {
+                return 1;
             }
         };
 
@@ -135,24 +160,26 @@ public class ChunkedWriteHandlerTest {
             }
         };
 
-        EmbeddedByteChannel ch = new EmbeddedByteChannel(new ChunkedWriteHandler());
-        ch.outboundMessageBuffer().add(input);
-        ch.flush().addListener(listener).syncUninterruptibly();
+        EmbeddedChannel ch = new EmbeddedChannel(new ChunkedWriteHandler());
+        ch.writeAndFlush(input).addListener(listener).syncUninterruptibly();
         ch.checkException();
         ch.finish();
 
         // the listener should have been notified
         assertTrue(listenerNotified.get());
 
-        assertEquals(buffer, ch.readOutbound());
+        ByteBuf buffer2 = ch.readOutbound();
+        assertEquals(buffer, buffer2);
         assertNull(ch.readOutbound());
 
+        buffer.release();
+        buffer2.release();
     }
 
     @Test
     public void testChunkedMessageInput() {
 
-        ChunkedMessageInput<Object> input = new ChunkedMessageInput<Object>() {
+        ChunkedInput<Object> input = new ChunkedInput<Object>() {
             private boolean done;
 
             @Override
@@ -165,32 +192,45 @@ public class ChunkedWriteHandlerTest {
                 // NOOP
             }
 
+            @Deprecated
             @Override
-            public boolean readChunk(MessageBuf<Object> buffer) throws Exception {
+            public Object readChunk(ChannelHandlerContext ctx) throws Exception {
+                return readChunk(ctx.alloc());
+            }
+
+            @Override
+            public Object readChunk(ByteBufAllocator ctx) throws Exception {
                 if (done) {
                     return false;
                 }
                 done = true;
-                buffer.add(0);
-                return true;
+                return 0;
+            }
+
+            @Override
+            public long length() {
+                return -1;
+            }
+
+            @Override
+            public long progress() {
+                return 1;
             }
         };
 
-        EmbeddedMessageChannel ch = new EmbeddedMessageChannel(new ChunkedWriteHandler());
-        ch.outboundMessageBuffer().add(input);
-        ch.flush().syncUninterruptibly();
+        EmbeddedChannel ch = new EmbeddedChannel(new ChunkedWriteHandler());
+        ch.writeAndFlush(input).syncUninterruptibly();
         ch.checkException();
         assertTrue(ch.finish());
 
         assertEquals(0, ch.readOutbound());
         assertNull(ch.readOutbound());
-
     }
 
-    private static void check(ChunkedInput<?>... inputs) {
-        EmbeddedByteChannel ch = new EmbeddedByteChannel(new ChunkedWriteHandler());
+    private static void check(Object... inputs) {
+        EmbeddedChannel ch = new EmbeddedChannel(new ChunkedWriteHandler());
 
-        for (ChunkedInput<?> input: inputs) {
+        for (Object input: inputs) {
             ch.writeOutbound(input);
         }
 
@@ -210,6 +250,7 @@ public class ChunkedWriteHandlerTest {
                     i = 0;
                 }
             }
+            buffer.release();
         }
 
         assertEquals(BYTES.length * inputs.length, read);

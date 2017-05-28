@@ -15,27 +15,31 @@
  */
 package io.netty.handler.codec.bytes;
 
-import static io.netty.buffer.Unpooled.*;
-import static org.hamcrest.core.Is.*;
-import static org.hamcrest.core.IsNull.*;
-import static org.junit.Assert.*;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.embedded.EmbeddedMessageChannel;
-
-import java.util.Random;
-
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.util.internal.EmptyArrays;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-/**
- */
+import java.util.Random;
+
+import static io.netty.buffer.Unpooled.*;
+import static org.hamcrest.CoreMatchers.*;
+import static org.junit.Assert.*;
+
 public class ByteArrayEncoderTest {
 
-    private EmbeddedMessageChannel ch;
+    private EmbeddedChannel ch;
 
     @Before
     public void setUp() {
-        ch = new EmbeddedMessageChannel(new ByteArrayEncoder());
+        ch = new EmbeddedChannel(new ByteArrayEncoder());
+    }
+
+    @After
+    public void tearDown() {
+        assertThat(ch.finish(), is(false));
     }
 
     @Test
@@ -43,14 +47,15 @@ public class ByteArrayEncoderTest {
         byte[] b = new byte[2048];
         new Random().nextBytes(b);
         ch.writeOutbound(b);
-        assertThat((ByteBuf) ch.readOutbound(), is(wrappedBuffer(b)));
+        ByteBuf encoded = ch.readOutbound();
+        assertThat(encoded, is(wrappedBuffer(b)));
+        encoded.release();
     }
 
     @Test
     public void testEncodeEmpty() {
-        byte[] b = new byte[0];
-        ch.writeOutbound(b);
-        assertThat(ch.readOutbound(), nullValue());
+        ch.writeOutbound(EmptyArrays.EMPTY_BYTES);
+        assertThat((ByteBuf) ch.readOutbound(), is(sameInstance(EMPTY_BUFFER)));
     }
 
     @Test

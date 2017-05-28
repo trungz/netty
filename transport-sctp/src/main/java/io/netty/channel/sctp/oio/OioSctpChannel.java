@@ -19,22 +19,25 @@ import com.sun.nio.sctp.Association;
 import com.sun.nio.sctp.MessageInfo;
 import com.sun.nio.sctp.NotificationHandler;
 import com.sun.nio.sctp.SctpChannel;
-import io.netty.buffer.BufType;
+
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.MessageBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelMetadata;
+import io.netty.channel.ChannelOutboundBuffer;
 import io.netty.channel.ChannelPromise;
-import io.netty.channel.sctp.SctpServerChannel;
+import io.netty.channel.RecvByteBufAllocator;
 import io.netty.channel.oio.AbstractOioMessageChannel;
 import io.netty.channel.sctp.DefaultSctpChannelConfig;
 import io.netty.channel.sctp.SctpChannelConfig;
 import io.netty.channel.sctp.SctpMessage;
 import io.netty.channel.sctp.SctpNotificationHandler;
-import io.netty.logging.InternalLogger;
-import io.netty.logging.InternalLoggerFactory;
+import io.netty.channel.sctp.SctpServerChannel;
+import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.StringUtil;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -46,6 +49,7 @@ import java.nio.channels.Selector;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -61,7 +65,8 @@ public class OioSctpChannel extends AbstractOioMessageChannel
     private static final InternalLogger logger =
             InternalLoggerFactory.getInstance(OioSctpChannel.class);
 
-    private static final ChannelMetadata METADATA = new ChannelMetadata(BufType.MESSAGE, false);
+    private static final ChannelMetadata METADATA = new ChannelMetadata(false);
+    private static final String EXPECTED_TYPE = " (expected: " + StringUtil.simpleClassName(SctpMessage.class) + ')';
 
     private final SctpChannel ch;
     private final SctpChannelConfig config;
@@ -93,7 +98,7 @@ public class OioSctpChannel extends AbstractOioMessageChannel
      * @param ch    the {@link SctpChannel} which is used by this instance
      */
     public OioSctpChannel(SctpChannel ch) {
-        this(null, null, ch);
+        this(null, ch);
     }
 
     /**
@@ -101,11 +106,10 @@ public class OioSctpChannel extends AbstractOioMessageChannel
      *
      * @param parent    the parent {@link Channel} which was used to create this instance. This can be null if the
      *                  {@link} has no parent as it was created by your self.
-     * @param id        the id which should be used for this instance or {@code null} if a new one should be generated
      * @param ch        the {@link SctpChannel} which is used by this instance
      */
-    public OioSctpChannel(Channel parent, Integer id, SctpChannel ch) {
-        super(parent, id);
+    public OioSctpChannel(Channel parent, SctpChannel ch) {
+        super(parent);
         this.ch = ch;
         boolean success = false;
         try {
@@ -118,7 +122,7 @@ public class OioSctpChannel extends AbstractOioMessageChannel
             ch.register(writeSelector, SelectionKey.OP_WRITE);
             ch.register(connectSelector, SelectionKey.OP_CONNECT);
 
-            config = new DefaultSctpChannelConfig(this, ch);
+            config = new OioSctpChannelConfig(this, ch);
             notificationHandler = new SctpNotificationHandler(this);
             success = true;
         } catch (Exception e) {
@@ -165,7 +169,7 @@ public class OioSctpChannel extends AbstractOioMessageChannel
     }
 
     @Override
-    protected int doReadMessages(MessageBuf<Object> buf) throws Exception {
+    protected int doReadMessages(List<Object> msgs) throws Exception {
         if (!readSelector.isOpen()) {
             return 0;
         }
@@ -178,92 +182,109 @@ public class OioSctpChannel extends AbstractOioMessageChannel
         if (!keysSelected) {
             return readMessages;
         }
+        // We must clear the selectedKeys because the Selector will never do it. If we do not clear it, the selectionKey
+        // will always be returned even if there is no data can be read which causes performance issue. And in some
+        // implementation of Selector, the select method may return 0 if the selectionKey which is ready for process has
+        // already been in the selectedKeys and cause the keysSelected above to be false even if we actually have
+        // something to read.
+        readSelector.selectedKeys().clear();
+        final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
+        ByteBuf buffer = allocHandle.allocate(config().getAllocator());
+        boolean free = true;
 
-        Set<SelectionKey> reableKeys = readSelector.selectedKeys();
         try {
-            for (SelectionKey ignored : reableKeys) {
-                ByteBuf buffer = alloc().directBuffer(config().getReceiveBufferSize());
-                boolean free = true;
-
-                try {
-                    ByteBuffer data = buffer.nioBuffer(buffer.writerIndex(), buffer.writableBytes());
-                    MessageInfo messageInfo = ch.receive(data, null, notificationHandler);
-                    if (messageInfo == null) {
-                        return readMessages;
-                    }
-
-                    data.flip();
-                    buf.add(new SctpMessage(messageInfo, buffer.writerIndex(buffer.writerIndex() + data.remaining())));
-                    free = false;
-                    readMessages ++;
-                } catch (Throwable cause) {
-                    if (cause instanceof Error) {
-                        throw (Error) cause;
-                    }
-                    if (cause instanceof RuntimeException) {
-                        throw (RuntimeException) cause;
-                    }
-                    if (cause instanceof Exception) {
-                        throw (Exception) cause;
-                    }
-                    throw new ChannelException(cause);
-                }  finally {
-                    if (free) {
-                        buffer.free();
-                    }
-                }
+            ByteBuffer data = buffer.nioBuffer(buffer.writerIndex(), buffer.writableBytes());
+            MessageInfo messageInfo = ch.receive(data, null, notificationHandler);
+            if (messageInfo == null) {
+                return readMessages;
             }
-        } finally {
-            reableKeys.clear();
-        }
 
+            data.flip();
+            allocHandle.lastBytesRead(data.remaining());
+            msgs.add(new SctpMessage(messageInfo,
+                    buffer.writerIndex(buffer.writerIndex() + allocHandle.lastBytesRead())));
+            free = false;
+            ++readMessages;
+        } catch (Throwable cause) {
+            PlatformDependent.throwException(cause);
+        }  finally {
+            if (free) {
+                buffer.release();
+            }
+        }
         return readMessages;
     }
 
     @Override
-    protected void doWriteMessages(MessageBuf<Object> buf) throws Exception {
+    protected void doWrite(ChannelOutboundBuffer in) throws Exception {
         if (!writeSelector.isOpen()) {
             return;
         }
+        final int size = in.size();
         final int selectedKeys = writeSelector.select(SO_TIMEOUT);
         if (selectedKeys > 0) {
             final Set<SelectionKey> writableKeys = writeSelector.selectedKeys();
-            for (SelectionKey ignored : writableKeys) {
-                SctpMessage packet = (SctpMessage) buf.poll();
+            if (writableKeys.isEmpty()) {
+                return;
+            }
+            Iterator<SelectionKey> writableKeysIt = writableKeys.iterator();
+            int written = 0;
+            for (;;) {
+                if (written == size) {
+                    // all written
+                    return;
+                }
+                writableKeysIt.next();
+                writableKeysIt.remove();
+
+                SctpMessage packet = (SctpMessage) in.current();
                 if (packet == null) {
                     return;
                 }
-                try {
-                    ByteBuf data = packet.data();
-                    int dataLen = data.readableBytes();
-                    ByteBuffer nioData;
 
-                    if (data.nioBufferCount() != -1) {
-                        nioData = data.nioBuffer();
-                    } else {
-                        nioData = ByteBuffer.allocate(dataLen);
-                        data.getBytes(data.readerIndex(), nioData);
-                        nioData.flip();
-                    }
+                ByteBuf data = packet.content();
+                int dataLen = data.readableBytes();
+                ByteBuffer nioData;
 
-                    final MessageInfo mi = MessageInfo.createOutgoing(association(), null, packet.streamIdentifier());
-                    mi.payloadProtocolID(packet.protocolIdentifier());
-                    mi.streamNumber(packet.streamIdentifier());
+                if (data.nioBufferCount() != -1) {
+                    nioData = data.nioBuffer();
+                } else {
+                    nioData = ByteBuffer.allocate(dataLen);
+                    data.getBytes(data.readerIndex(), nioData);
+                    nioData.flip();
+                }
 
-                    ch.send(nioData, mi);
-                } finally {
-                    packet.free();
+                final MessageInfo mi = MessageInfo.createOutgoing(association(), null, packet.streamIdentifier());
+                mi.payloadProtocolID(packet.protocolIdentifier());
+                mi.streamNumber(packet.streamIdentifier());
+                mi.unordered(packet.isUnordered());
+
+                ch.send(nioData, mi);
+                written ++;
+                in.remove();
+
+                if (!writableKeysIt.hasNext()) {
+                    return;
                 }
             }
-            writableKeys.clear();
         }
+    }
+
+    @Override
+    protected Object filterOutboundMessage(Object msg) throws Exception {
+        if (msg instanceof SctpMessage) {
+            return msg;
+        }
+
+        throw new UnsupportedOperationException(
+                "unsupported message type: " + StringUtil.simpleClassName(msg) + EXPECTED_TYPE);
     }
 
     @Override
     public Association association() {
         try {
             return ch.association();
-        } catch (IOException e) {
+        } catch (IOException ignored) {
             return null;
         }
     }
@@ -295,7 +316,7 @@ public class OioSctpChannel extends AbstractOioMessageChannel
                 addresses.add((InetSocketAddress) socketAddress);
             }
             return addresses;
-        } catch (Throwable t) {
+        } catch (Throwable ignored) {
             return Collections.emptySet();
         }
     }
@@ -322,7 +343,7 @@ public class OioSctpChannel extends AbstractOioMessageChannel
                 addresses.add((InetSocketAddress) socketAddress);
             }
             return addresses;
-        } catch (Throwable t) {
+        } catch (Throwable ignored) {
             return Collections.emptySet();
         }
     }
@@ -433,5 +454,16 @@ public class OioSctpChannel extends AbstractOioMessageChannel
             });
         }
         return promise;
+    }
+
+    private final class OioSctpChannelConfig extends DefaultSctpChannelConfig {
+        private OioSctpChannelConfig(OioSctpChannel channel, SctpChannel javaChannel) {
+            super(channel, javaChannel);
+        }
+
+        @Override
+        protected void autoReadCleared() {
+            clearReadPending();
+        }
     }
 }

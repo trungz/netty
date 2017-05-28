@@ -14,15 +14,14 @@
   ~ License for the specific language governing permissions and limitations
   ~ under the License.
   -->
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
 
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
     <groupId>io.netty</groupId>
     <artifactId>netty-parent</artifactId>
-    <version>4.0.0.Beta1-SNAPSHOT</version>
+    <version>4.1.12.Final-SNAPSHOT</version>
   </parent>
 
   <artifactId>netty-example</artifactId>
@@ -48,7 +47,27 @@
     </dependency>
     <dependency>
       <groupId>${project.groupId}</groupId>
+      <artifactId>netty-handler-proxy</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
       <artifactId>netty-codec-http</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>netty-codec-http2</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>netty-codec-memcache</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>netty-codec-redis</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
@@ -57,8 +76,37 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>netty-codec-stomp</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>com.google.protobuf</groupId>
       <artifactId>protobuf-java</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>${tcnative.artifactId}</artifactId>
+      <classifier>${tcnative.classifier}</classifier>
+    </dependency>
+    <dependency>
+      <groupId>${conscrypt.groupId}</groupId>
+      <artifactId>${conscrypt.artifactId}</artifactId>
+      <classifier>${conscrypt.classifier}</classifier>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jetty.npn</groupId>
+      <artifactId>npn-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.jcraft</groupId>
+      <artifactId>jzlib</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.javassist</groupId>
+      <artifactId>javassist</artifactId>
+      <scope>runtime</scope>
     </dependency>
 
     <!-- see https://github.com/netty/netty/issues/874 -->
@@ -76,5 +124,43 @@
       <artifactId>netty-transport-rxtx</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    
+    <!-- Needed for OCSP -->
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-jdk15on</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcprov-jdk15on</artifactId>
+    </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <!-- run-example.sh invokes this plugin to launch an example. -->
+      <plugin>
+        <groupId>kr.motd.maven</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <configuration>
+          <executable>${java.home}/bin/java</executable>
+          <commandlineArgs>
+            ${argLine.common}
+            ${argLine.alpnAgent}
+            -classpath %classpath
+            ${argLine.leak}
+            ${argLine.coverage}
+            ${argLine.example}
+            ${exampleClass}
+          </commandlineArgs>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
 </project>
+

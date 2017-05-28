@@ -20,7 +20,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.util.CharsetUtil;
 
 /**
- * Web Socket text frame with assumed UTF-8 encoding
+ * Web Socket text frame
  */
 public class TextWebSocketFrame extends WebSocketFrame {
 
@@ -45,7 +45,7 @@ public class TextWebSocketFrame extends WebSocketFrame {
      * Creates a new text frame with the specified binary data. The final fragment flag is set to true.
      *
      * @param binaryData
-     *            the content of the frame. Must be UTF-8 encoded
+     *            the content of the frame.
      */
     public TextWebSocketFrame(ByteBuf binaryData) {
         super(binaryData);
@@ -81,7 +81,7 @@ public class TextWebSocketFrame extends WebSocketFrame {
      * @param rsv
      *            reserved bits used for protocol extensions
      * @param binaryData
-     *            the content of the frame. Must be UTF-8 encoded
+     *            the content of the frame.
      */
     public TextWebSocketFrame(boolean finalFragment, int rsv, ByteBuf binaryData) {
         super(finalFragment, rsv, binaryData);
@@ -91,11 +91,50 @@ public class TextWebSocketFrame extends WebSocketFrame {
      * Returns the text data in this frame
      */
     public String text() {
-        return data().toString(CharsetUtil.UTF_8);
+        return content().toString(CharsetUtil.UTF_8);
     }
 
     @Override
     public TextWebSocketFrame copy() {
-        return new TextWebSocketFrame(isFinalFragment(), rsv(), data().copy());
+        return (TextWebSocketFrame) super.copy();
+    }
+
+    @Override
+    public TextWebSocketFrame duplicate() {
+        return (TextWebSocketFrame) super.duplicate();
+    }
+
+    @Override
+    public TextWebSocketFrame retainedDuplicate() {
+        return (TextWebSocketFrame) super.retainedDuplicate();
+    }
+
+    @Override
+    public TextWebSocketFrame replace(ByteBuf content) {
+        return new TextWebSocketFrame(isFinalFragment(), rsv(), content);
+    }
+
+    @Override
+    public TextWebSocketFrame retain() {
+        super.retain();
+        return this;
+    }
+
+    @Override
+    public TextWebSocketFrame retain(int increment) {
+        super.retain(increment);
+        return this;
+    }
+
+    @Override
+    public TextWebSocketFrame touch() {
+        super.touch();
+        return this;
+    }
+
+    @Override
+    public TextWebSocketFrame touch(Object hint) {
+        super.touch(hint);
+        return this;
     }
 }

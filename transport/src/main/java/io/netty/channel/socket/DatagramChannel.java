@@ -24,9 +24,7 @@ import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 
 /**
- * A UDP/IP {@link Channel}}.
- * @apiviz.landmark
- * @apiviz.composedOf io.netty.channel.socket.DatagramChannelConfig
+ * A UDP/IP {@link Channel}.
  */
 public interface DatagramChannel extends Channel {
     @Override

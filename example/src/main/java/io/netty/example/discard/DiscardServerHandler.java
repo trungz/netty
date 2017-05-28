@@ -15,36 +15,23 @@
  */
 package io.netty.example.discard;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundByteHandlerAdapter;
-
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import io.netty.channel.SimpleChannelInboundHandler;
 
 /**
  * Handles a server-side channel.
  */
-public class DiscardServerHandler extends ChannelInboundByteHandlerAdapter {
-
-    private static final Logger logger = Logger.getLogger(
-            DiscardServerHandler.class.getName());
+public class DiscardServerHandler extends SimpleChannelInboundHandler<Object> {
 
     @Override
-    public void inboundBufferUpdated(ChannelHandlerContext ctx, ByteBuf in)
-            throws Exception {
-        // Discard the received data silently.
-        in.clear();
+    public void channelRead0(ChannelHandlerContext ctx, Object msg) throws Exception {
+        // discard
     }
 
     @Override
-    public void exceptionCaught(ChannelHandlerContext ctx,
-            Throwable cause) throws Exception {
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         // Close the connection when an exception is raised.
-        logger.log(
-                Level.WARNING,
-                "Unexpected exception from downstream.",
-                cause);
+        cause.printStackTrace();
         ctx.close();
     }
 }

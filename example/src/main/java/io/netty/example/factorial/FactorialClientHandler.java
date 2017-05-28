@@ -15,17 +15,14 @@
  */
 package io.netty.example.factorial;
 
-import io.netty.buffer.MessageBuf;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundMessageHandlerAdapter;
+import io.netty.channel.SimpleChannelInboundHandler;
 
 import java.math.BigInteger;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Handler for a client-side channel.  This handler maintains stateful
@@ -34,32 +31,26 @@ import java.util.logging.Logger;
  * to create a new handler instance whenever you create a new channel and insert
  * this handler to avoid a race condition.
  */
-public class FactorialClientHandler extends ChannelInboundMessageHandlerAdapter<BigInteger> {
-
-    private static final Logger logger = Logger.getLogger(
-            FactorialClientHandler.class.getName());
+public class FactorialClientHandler extends SimpleChannelInboundHandler<BigInteger> {
 
     private ChannelHandlerContext ctx;
-    private int i = 1;
     private int receivedMessages;
-    private final int count;
+    private int next = 1;
     final BlockingQueue<BigInteger> answer = new LinkedBlockingQueue<BigInteger>();
-
-    public FactorialClientHandler(int count) {
-        this.count = count;
-    }
 
     public BigInteger getFactorial() {
         boolean interrupted = false;
-        for (;;) {
-            try {
-                BigInteger factorial = answer.take();
-                if (interrupted) {
-                    Thread.currentThread().interrupt();
+        try {
+            for (;;) {
+                try {
+                    return answer.take();
+                } catch (InterruptedException ignore) {
+                    interrupted = true;
                 }
-                return factorial;
-            } catch (InterruptedException e) {
-                interrupted = true;
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
             }
         }
     }
@@ -71,10 +62,9 @@ public class FactorialClientHandler extends ChannelInboundMessageHandlerAdapter<
     }
 
     @Override
-    public void messageReceived(
-            ChannelHandlerContext ctx, final BigInteger msg) {
+    public void channelRead0(ChannelHandlerContext ctx, final BigInteger msg) {
         receivedMessages ++;
-        if (receivedMessages == count) {
+        if (receivedMessages == FactorialClient.COUNT) {
             // Offer the answer after closing the connection.
             ctx.channel().close().addListener(new ChannelFutureListener() {
                 @Override
@@ -87,32 +77,23 @@ public class FactorialClientHandler extends ChannelInboundMessageHandlerAdapter<
     }
 
     @Override
-    public void exceptionCaught(
-            ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        logger.log(
-                Level.WARNING,
-                "Unexpected exception from downstream.", cause);
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+        cause.printStackTrace();
         ctx.close();
     }
 
     private void sendNumbers() {
         // Do not send more than 4096 numbers.
-        boolean finished = false;
-        MessageBuf<Object> out = ctx.nextOutboundMessageBuffer();
-        while (out.size() < 4096) {
-            if (i <= count) {
-                out.add(Integer.valueOf(i));
-                i ++;
-            } else {
-                finished = true;
-                break;
-            }
+        ChannelFuture future = null;
+        for (int i = 0; i < 4096 && next <= FactorialClient.COUNT; i++) {
+            future = ctx.write(Integer.valueOf(next));
+            next++;
         }
-
-        ChannelFuture f = ctx.flush();
-        if (!finished) {
-            f.addListener(numberSender);
+        if (next <= FactorialClient.COUNT) {
+            assert future != null;
+            future.addListener(numberSender);
         }
+        ctx.flush();
     }
 
     private final ChannelFutureListener numberSender = new ChannelFutureListener() {
@@ -120,6 +101,9 @@ public class FactorialClientHandler extends ChannelInboundMessageHandlerAdapter<
         public void operationComplete(ChannelFuture future) throws Exception {
             if (future.isSuccess()) {
                 sendNumbers();
+            } else {
+                future.cause().printStackTrace();
+                future.channel().close();
             }
         }
     };

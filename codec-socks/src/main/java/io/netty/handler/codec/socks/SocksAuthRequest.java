@@ -27,8 +27,8 @@ import java.nio.charset.CharsetEncoder;
  * @see SocksAuthRequestDecoder
  */
 public final class SocksAuthRequest extends SocksRequest {
-    private static final CharsetEncoder asciiEncoder = CharsetUtil.getEncoder(CharsetUtil.US_ASCII);
-    private static final SubnegotiationVersion SUBNEGOTIATION_VERSION = SubnegotiationVersion.AUTH_PASSWORD;
+    private static final CharsetEncoder asciiEncoder = CharsetUtil.encoder(CharsetUtil.US_ASCII);
+    private static final SocksSubnegotiationVersion SUBNEGOTIATION_VERSION = SocksSubnegotiationVersion.AUTH_PASSWORD;
     private final String username;
     private final String password;
 
@@ -41,14 +41,14 @@ public final class SocksAuthRequest extends SocksRequest {
             throw new NullPointerException("username");
         }
         if (!asciiEncoder.canEncode(username) || !asciiEncoder.canEncode(password)) {
-            throw new IllegalArgumentException(" username: " + username + " or password: " + password +
-                    " values should be in pure ascii");
+            throw new IllegalArgumentException(
+                    "username: " + username + " or password: **** values should be in pure ascii");
         }
         if (username.length() > 255) {
-            throw new IllegalArgumentException(username + " exceeds 255 char limit");
+            throw new IllegalArgumentException("username: " + username + " exceeds 255 char limit");
         }
         if (password.length() > 255) {
-            throw new IllegalArgumentException(password + " exceeds 255 char limit");
+            throw new IllegalArgumentException("password: **** exceeds 255 char limit");
         }
         this.username = username;
         this.password = password;
@@ -74,7 +74,7 @@ public final class SocksAuthRequest extends SocksRequest {
 
     @Override
     public void encodeAsByteBuf(ByteBuf byteBuf) {
-        byteBuf.writeByte(SUBNEGOTIATION_VERSION.getByteValue());
+        byteBuf.writeByte(SUBNEGOTIATION_VERSION.byteValue());
         byteBuf.writeByte(username.length());
         byteBuf.writeBytes(username.getBytes(CharsetUtil.US_ASCII));
         byteBuf.writeByte(password.length());

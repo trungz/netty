@@ -15,44 +15,35 @@
  */
 package io.netty.example.udt.echo.message;
 
-import io.netty.buffer.MessageBuf;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundMessageHandlerAdapter;
-import io.netty.channel.udt.UdtMessage;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.udt.nio.NioUdtProvider;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Handler implementation for the echo server.
  */
 @Sharable
-public class MsgEchoServerHandler extends
-        ChannelInboundMessageHandlerAdapter<UdtMessage> {
-
-    private static final Logger log = LoggerFactory
-            .getLogger(MsgEchoServerHandler.class.getName());
+public class MsgEchoServerHandler extends ChannelInboundHandlerAdapter {
 
     @Override
-    public void exceptionCaught(final ChannelHandlerContext ctx,
-            final Throwable cause) {
-        log.error("close the connection when an exception is raised", cause);
-        ctx.close();
+    public void channelActive(final ChannelHandlerContext ctx) {
+        System.err.println("ECHO active " + NioUdtProvider.socketUDT(ctx.channel()).toStringOptions());
     }
 
     @Override
-    public void channelActive(final ChannelHandlerContext ctx) throws Exception {
-        log.info("ECHO active {}", NioUdtProvider.socketUDT(ctx.channel())
-                .toStringOptions());
+    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+        ctx.write(msg);
     }
 
     @Override
-    protected void messageReceived(final ChannelHandlerContext ctx,
-            final UdtMessage message) throws Exception {
-        final MessageBuf<Object> out = ctx.nextOutboundMessageBuffer();
-        out.add(message);
+    public void channelReadComplete(ChannelHandlerContext ctx) {
         ctx.flush();
     }
 
+    @Override
+    public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) {
+        cause.printStackTrace();
+        ctx.close();
+    }
 }

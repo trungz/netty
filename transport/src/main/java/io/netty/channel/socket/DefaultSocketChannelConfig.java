@@ -19,6 +19,9 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.DefaultChannelConfig;
+import io.netty.channel.MessageSizeEstimator;
+import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
 import io.netty.util.internal.PlatformDependent;
 
 import java.net.Socket;
@@ -279,21 +282,68 @@ public class DefaultSocketChannelConfig extends DefaultChannelConfig
 
     @Override
     public SocketChannelConfig setConnectTimeoutMillis(int connectTimeoutMillis) {
-        return (SocketChannelConfig) super.setConnectTimeoutMillis(connectTimeoutMillis);
+        super.setConnectTimeoutMillis(connectTimeoutMillis);
+        return this;
+    }
+
+    @Override
+    @Deprecated
+    public SocketChannelConfig setMaxMessagesPerRead(int maxMessagesPerRead) {
+        super.setMaxMessagesPerRead(maxMessagesPerRead);
+        return this;
     }
 
     @Override
     public SocketChannelConfig setWriteSpinCount(int writeSpinCount) {
-        return (SocketChannelConfig) super.setWriteSpinCount(writeSpinCount);
+        super.setWriteSpinCount(writeSpinCount);
+        return this;
     }
 
     @Override
     public SocketChannelConfig setAllocator(ByteBufAllocator allocator) {
-        return (SocketChannelConfig) super.setAllocator(allocator);
+        super.setAllocator(allocator);
+        return this;
+    }
+
+    @Override
+    public SocketChannelConfig setRecvByteBufAllocator(RecvByteBufAllocator allocator) {
+        super.setRecvByteBufAllocator(allocator);
+        return this;
     }
 
     @Override
     public SocketChannelConfig setAutoRead(boolean autoRead) {
-        return (SocketChannelConfig) super.setAutoRead(autoRead);
+         super.setAutoRead(autoRead);
+        return this;
+    }
+
+    @Override
+    public SocketChannelConfig setAutoClose(boolean autoClose) {
+        super.setAutoClose(autoClose);
+        return this;
+    }
+
+    @Override
+    public SocketChannelConfig setWriteBufferHighWaterMark(int writeBufferHighWaterMark) {
+        super.setWriteBufferHighWaterMark(writeBufferHighWaterMark);
+        return this;
+    }
+
+    @Override
+    public SocketChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark) {
+        super.setWriteBufferLowWaterMark(writeBufferLowWaterMark);
+        return this;
+    }
+
+    @Override
+    public SocketChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark) {
+        super.setWriteBufferWaterMark(writeBufferWaterMark);
+        return this;
+    }
+
+    @Override
+    public SocketChannelConfig setMessageSizeEstimator(MessageSizeEstimator estimator) {
+        super.setMessageSizeEstimator(estimator);
+        return this;
     }
 }

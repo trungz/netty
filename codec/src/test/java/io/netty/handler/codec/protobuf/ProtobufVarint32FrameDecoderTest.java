@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2015 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -15,36 +15,42 @@
  */
 package io.netty.handler.codec.protobuf;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.embedded.EmbeddedChannel;
+import org.junit.Before;
+import org.junit.Test;
+
 import static io.netty.buffer.Unpooled.*;
 import static org.hamcrest.core.Is.*;
 import static org.hamcrest.core.IsNull.*;
 import static org.junit.Assert.*;
-import io.netty.buffer.ByteBuf;
-import io.netty.channel.embedded.EmbeddedByteChannel;
-
-import org.junit.Before;
-import org.junit.Test;
 
 public class ProtobufVarint32FrameDecoderTest {
 
-    private EmbeddedByteChannel ch;
+    private EmbeddedChannel ch;
 
     @Before
     public void setUp() {
-        ch = new EmbeddedByteChannel(new ProtobufVarint32FrameDecoder());
+        ch = new EmbeddedChannel(new ProtobufVarint32FrameDecoder());
     }
 
     @Test
     public void testTinyDecode() {
         byte[] b = { 4, 1, 1, 1, 1 };
-        ch.writeInbound(wrappedBuffer(b, 0, 1));
+        assertFalse(ch.writeInbound(wrappedBuffer(b, 0, 1)));
         assertThat(ch.readInbound(), is(nullValue()));
-        ch.writeInbound(wrappedBuffer(b, 1, 2));
+        assertFalse(ch.writeInbound(wrappedBuffer(b, 1, 2)));
         assertThat(ch.readInbound(), is(nullValue()));
-        ch.writeInbound(wrappedBuffer(b, 3, b.length - 3));
-        assertThat(
-                (ByteBuf) ch.readInbound(),
-                is(wrappedBuffer(new byte[] { 1, 1, 1, 1 })));
+        assertTrue(ch.writeInbound(wrappedBuffer(b, 3, b.length - 3)));
+
+        ByteBuf expected = wrappedBuffer(new byte[] { 1, 1, 1, 1 });
+        ByteBuf actual = ch.readInbound();
+
+        assertThat(expected, is(actual));
+        assertFalse(ch.finish());
+
+        expected.release();
+        actual.release();
     }
 
     @Test
@@ -55,11 +61,20 @@ public class ProtobufVarint32FrameDecoderTest {
         }
         b[0] = -2;
         b[1] = 15;
-        ch.writeInbound(wrappedBuffer(b, 0, 127));
+        assertFalse(ch.writeInbound(wrappedBuffer(b, 0, 1)));
         assertThat(ch.readInbound(), is(nullValue()));
-        ch.writeInbound(wrappedBuffer(b, 127, 600));
+        assertFalse(ch.writeInbound(wrappedBuffer(b, 1, 127)));
         assertThat(ch.readInbound(), is(nullValue()));
-        ch.writeInbound(wrappedBuffer(b, 727, b.length - 727));
-        assertThat((ByteBuf) ch.readInbound(), is(wrappedBuffer(b, 2, b.length - 2)));
+        assertFalse(ch.writeInbound(wrappedBuffer(b, 127, 600)));
+        assertThat(ch.readInbound(), is(nullValue()));
+        assertTrue(ch.writeInbound(wrappedBuffer(b, 727, b.length - 727)));
+
+        ByteBuf expected = wrappedBuffer(b, 2, b.length - 2);
+        ByteBuf actual = ch.readInbound();
+        assertThat(expected, is(actual));
+        assertFalse(ch.finish());
+
+        expected.release();
+        actual.release();
     }
 }

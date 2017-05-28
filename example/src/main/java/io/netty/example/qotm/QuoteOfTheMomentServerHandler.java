@@ -17,13 +17,13 @@ package io.netty.example.qotm;
 
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundMessageHandlerAdapter;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.util.CharsetUtil;
 
 import java.util.Random;
 
-public class QuoteOfTheMomentServerHandler extends ChannelInboundMessageHandlerAdapter<DatagramPacket> {
+public class QuoteOfTheMomentServerHandler extends SimpleChannelInboundHandler<DatagramPacket> {
 
     private static final Random random = new Random();
 
@@ -44,20 +44,21 @@ public class QuoteOfTheMomentServerHandler extends ChannelInboundMessageHandlerA
     }
 
     @Override
-    public void messageReceived(
-            ChannelHandlerContext ctx, DatagramPacket msg)
-            throws Exception {
-        if ("QOTM?".equals(msg.data().toString(CharsetUtil.UTF_8))) {
+    public void channelRead0(ChannelHandlerContext ctx, DatagramPacket packet) throws Exception {
+        System.err.println(packet);
+        if ("QOTM?".equals(packet.content().toString(CharsetUtil.UTF_8))) {
             ctx.write(new DatagramPacket(
-                    Unpooled.copiedBuffer("QOTM: " + nextQuote(), CharsetUtil.UTF_8),
-                    msg.remoteAddress()));
+                    Unpooled.copiedBuffer("QOTM: " + nextQuote(), CharsetUtil.UTF_8), packet.sender()));
         }
     }
 
     @Override
-    public void exceptionCaught(
-            ChannelHandlerContext ctx, Throwable cause)
-            throws Exception {
+    public void channelReadComplete(ChannelHandlerContext ctx) {
+        ctx.flush();
+    }
+
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         cause.printStackTrace();
         // We don't close the channel because we can keep serving requests.
     }

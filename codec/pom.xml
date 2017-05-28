@@ -20,11 +20,11 @@
   <parent>
     <groupId>io.netty</groupId>
     <artifactId>netty-parent</artifactId>
-    <version>4.0.0.Beta1-SNAPSHOT</version>
+    <version>4.1.12.Final-SNAPSHOT</version>
   </parent>
 
   <artifactId>netty-codec</artifactId>
-  <packaging>bundle</packaging>
+  <packaging>jar</packaging>
 
   <name>Netty/Codec</name>
 
@@ -40,11 +40,41 @@
       <optional>true</optional>
     </dependency>
     <dependency>
+      <groupId>com.google.protobuf.nano</groupId>
+      <artifactId>protobuf-javanano</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
       <groupId>org.jboss.marshalling</groupId>
       <artifactId>jboss-marshalling</artifactId>
       <optional>true</optional>
     </dependency>
-    
+    <dependency>
+      <groupId>com.jcraft</groupId>
+      <artifactId>jzlib</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.ning</groupId>
+      <artifactId>compress-lzf</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>net.jpountz.lz4</groupId>
+      <artifactId>lz4</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.github.jponge</groupId>
+      <artifactId>lzma-java</artifactId>
+      <optional>true</optional>
+    </dependency>
+
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+    </dependency>
+
     <!-- Test dependencies for jboss marshalling encoder/decoder -->
     <dependency>
       <groupId>org.jboss.marshalling</groupId>
@@ -56,7 +86,13 @@
       <artifactId>jboss-marshalling-river</artifactId>
       <scope>test</scope>
     </dependency>
+
+    <!-- Test dependency for Bzip2 compression codec -->
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-compress</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
-      
 </project>
 

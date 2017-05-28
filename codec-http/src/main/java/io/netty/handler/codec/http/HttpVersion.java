@@ -15,6 +15,9 @@
  */
 package io.netty.handler.codec.http;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.util.CharsetUtil;
+
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,22 +25,24 @@ import java.util.regex.Pattern;
  * The version of HTTP or its derived protocols, such as
  * <a href="http://en.wikipedia.org/wiki/Real_Time_Streaming_Protocol">RTSP</a> and
  * <a href="http://en.wikipedia.org/wiki/Internet_Content_Adaptation_Protocol">ICAP</a>.
- * @apiviz.exclude
  */
 public class HttpVersion implements Comparable<HttpVersion> {
 
     private static final Pattern VERSION_PATTERN =
         Pattern.compile("(\\S+)/(\\d+)\\.(\\d+)");
 
+    private static final String HTTP_1_0_STRING = "HTTP/1.0";
+    private static final String HTTP_1_1_STRING = "HTTP/1.1";
+
     /**
      * HTTP/1.0
      */
-    public static final HttpVersion HTTP_1_0 = new HttpVersion("HTTP", 1, 0, false);
+    public static final HttpVersion HTTP_1_0 = new HttpVersion("HTTP", 1, 0, false, true);
 
     /**
      * HTTP/1.1
      */
-    public static final HttpVersion HTTP_1_1 = new HttpVersion("HTTP", 1, 1, true);
+    public static final HttpVersion HTTP_1_1 = new HttpVersion("HTTP", 1, 1, true, true);
 
     /**
      * Returns an existing or new {@link HttpVersion} instance which matches to
@@ -52,14 +57,35 @@ public class HttpVersion implements Comparable<HttpVersion> {
             throw new NullPointerException("text");
         }
 
-        text = text.trim().toUpperCase();
-        if ("HTTP/1.1".equals(text)) {
+        text = text.trim();
+
+        if (text.isEmpty()) {
+            throw new IllegalArgumentException("text is empty (possibly HTTP/0.9)");
+        }
+
+        // Try to match without convert to uppercase first as this is what 99% of all clients
+        // will send anyway. Also there is a change to the RFC to make it clear that it is
+        // expected to be case-sensitive
+        //
+        // See:
+        // * http://trac.tools.ietf.org/wg/httpbis/trac/ticket/1
+        // * http://trac.tools.ietf.org/wg/httpbis/trac/wiki
+        //
+        HttpVersion version = version0(text);
+        if (version == null) {
+            version = new HttpVersion(text, true);
+        }
+        return version;
+    }
+
+    private static HttpVersion version0(String text) {
+        if (HTTP_1_1_STRING.equals(text)) {
             return HTTP_1_1;
         }
-        if ("HTTP/1.0".equals(text)) {
+        if (HTTP_1_0_STRING.equals(text)) {
             return HTTP_1_0;
         }
-        return new HttpVersion(text, true);
+        return null;
     }
 
     private final String protocolName;
@@ -67,6 +93,7 @@ public class HttpVersion implements Comparable<HttpVersion> {
     private final int minorVersion;
     private final String text;
     private final boolean keepAliveDefault;
+    private final byte[] bytes;
 
     /**
      * Creates a new HTTP version with the specified version string.  You will
@@ -99,6 +126,7 @@ public class HttpVersion implements Comparable<HttpVersion> {
         minorVersion = Integer.parseInt(m.group(3));
         this.text = protocolName + '/' + majorVersion + '.' + minorVersion;
         this.keepAliveDefault = keepAliveDefault;
+        bytes = null;
     }
 
     /**
@@ -115,6 +143,12 @@ public class HttpVersion implements Comparable<HttpVersion> {
     public HttpVersion(
             String protocolName, int majorVersion, int minorVersion,
             boolean keepAliveDefault) {
+        this(protocolName, majorVersion, minorVersion, keepAliveDefault, false);
+    }
+
+    private HttpVersion(
+            String protocolName, int majorVersion, int minorVersion,
+            boolean keepAliveDefault, boolean bytes) {
         if (protocolName == null) {
             throw new NullPointerException("protocolName");
         }
@@ -126,7 +160,7 @@ public class HttpVersion implements Comparable<HttpVersion> {
 
         for (int i = 0; i < protocolName.length(); i ++) {
             if (Character.isISOControl(protocolName.charAt(i)) ||
-                Character.isWhitespace(protocolName.charAt(i))) {
+                    Character.isWhitespace(protocolName.charAt(i))) {
                 throw new IllegalArgumentException("invalid character in protocolName");
             }
         }
@@ -143,6 +177,12 @@ public class HttpVersion implements Comparable<HttpVersion> {
         this.minorVersion = minorVersion;
         text = protocolName + '/' + majorVersion + '.' + minorVersion;
         this.keepAliveDefault = keepAliveDefault;
+
+        if (bytes) {
+            this.bytes = text.getBytes(CharsetUtil.US_ASCII);
+        } else {
+            this.bytes = null;
+        }
     }
 
     /**
@@ -220,5 +260,13 @@ public class HttpVersion implements Comparable<HttpVersion> {
         }
 
         return minorVersion() - o.minorVersion();
+    }
+
+    void encode(ByteBuf buf) {
+        if (bytes == null) {
+            HttpUtil.encodeAscii0(text, buf);
+        } else {
+            buf.writeBytes(bytes);
+        }
     }
 }

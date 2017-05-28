@@ -16,27 +16,23 @@
 
 package io.netty.test.udt.util;
 
+import com.yammer.metrics.core.Meter;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundByteHandlerAdapter;
-import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.udt.nio.NioUdtProvider;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import com.yammer.metrics.core.Meter;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 /**
  * Handler implementation for the echo client. It initiates the ping-pong
  * traffic between the echo client and server by sending the first message to
  * the server on activation.
  */
-public class EchoByteHandler extends ChannelInboundByteHandlerAdapter {
+public class EchoByteHandler extends ChannelInboundHandlerAdapter {
 
-    private static final Logger log = LoggerFactory
-            .getLogger(EchoByteHandler.class.getName());
+    private static final InternalLogger log = InternalLoggerFactory.getInstance(EchoByteHandler.class);
 
     private final ByteBuf message;
 
@@ -55,37 +51,23 @@ public class EchoByteHandler extends ChannelInboundByteHandlerAdapter {
         for (int i = 0; i < message.capacity(); i++) {
             message.writeByte((byte) i);
         }
-
     }
 
     @Override
     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
 
-        log.info("ECHO active {}", NioUdtProvider.socketUDT(ctx.channel())
-                .toStringOptions());
+        log.info("ECHO active {}", NioUdtProvider.socketUDT(ctx.channel()).toStringOptions());
 
-        ctx.write(message);
-
-        ctx.flush();
-
+        ctx.writeAndFlush(message);
     }
 
     @Override
-    public void inboundBufferUpdated(final ChannelHandlerContext ctx,
-            final ByteBuf in) {
-
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        ByteBuf buf = (ByteBuf) msg;
         if (meter != null) {
-            meter.mark(in.readableBytes());
+            meter.mark(buf.readableBytes());
         }
-
-        final ByteBuf out = ctx.nextOutboundByteBuffer();
-
-        out.discardReadBytes(); // FIXME
-
-        out.writeBytes(in);
-
-        ctx.flush();
-
+        ctx.writeAndFlush(msg);
     }
 
     @Override
@@ -95,16 +77,5 @@ public class EchoByteHandler extends ChannelInboundByteHandlerAdapter {
         log.error("exception : {}", e.getMessage());
 
         ctx.close();
-
     }
-
-    @Override
-    public ByteBuf newInboundBuffer(final ChannelHandlerContext ctx)
-            throws Exception {
-
-        return ctx.alloc().directBuffer(
-                ctx.channel().config().getOption(ChannelOption.SO_RCVBUF));
-
-    }
-
 }

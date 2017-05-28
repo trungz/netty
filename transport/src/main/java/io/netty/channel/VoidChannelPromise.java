@@ -15,50 +15,56 @@
  */
 package io.netty.channel;
 
+import io.netty.util.concurrent.AbstractFuture;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
+
 import java.util.concurrent.TimeUnit;
 
-final class VoidChannelPromise implements ChannelFuture.Unsafe, ChannelPromise {
+final class VoidChannelPromise extends AbstractFuture<Void> implements ChannelPromise {
 
     private final Channel channel;
+    private final boolean fireException;
 
     /**
      * Creates a new instance.
      *
      * @param channel the {@link Channel} associated with this future
      */
-    public VoidChannelPromise(Channel channel) {
+    VoidChannelPromise(Channel channel, boolean fireException) {
         if (channel == null) {
             throw new NullPointerException("channel");
         }
         this.channel = channel;
+        this.fireException = fireException;
     }
 
     @Override
-    public ChannelPromise addListener(final ChannelFutureListener listener) {
+    public VoidChannelPromise addListener(GenericFutureListener<? extends Future<? super Void>> listener) {
         fail();
         return this;
     }
 
     @Override
-    public ChannelPromise addListeners(final ChannelFutureListener... listeners) {
+    public VoidChannelPromise addListeners(GenericFutureListener<? extends Future<? super Void>>... listeners) {
         fail();
         return this;
     }
 
     @Override
-    public ChannelPromise removeListener(ChannelFutureListener listener) {
+    public VoidChannelPromise removeListener(GenericFutureListener<? extends Future<? super Void>> listener) {
         // NOOP
         return this;
     }
 
     @Override
-    public ChannelPromise removeListeners(ChannelFutureListener... listeners) {
+    public VoidChannelPromise removeListeners(GenericFutureListener<? extends Future<? super Void>>... listeners) {
         // NOOP
         return this;
     }
 
     @Override
-    public ChannelPromise await() throws InterruptedException {
+    public VoidChannelPromise await() throws InterruptedException {
         if (Thread.interrupted()) {
             throw new InterruptedException();
         }
@@ -78,7 +84,7 @@ final class VoidChannelPromise implements ChannelFuture.Unsafe, ChannelPromise {
     }
 
     @Override
-    public ChannelPromise awaitUninterruptibly() {
+    public VoidChannelPromise awaitUninterruptibly() {
         fail();
         return this;
     }
@@ -111,31 +117,55 @@ final class VoidChannelPromise implements ChannelFuture.Unsafe, ChannelPromise {
     }
 
     @Override
+    public boolean setUncancellable() {
+        return true;
+    }
+
+    @Override
+    public boolean isCancellable() {
+        return false;
+    }
+
+    @Override
+    public boolean isCancelled() {
+        return false;
+    }
+
+    @Override
     public Throwable cause() {
         return null;
     }
 
     @Override
-    public ChannelPromise sync() {
+    public VoidChannelPromise sync() {
         fail();
         return this;
     }
 
     @Override
-    public ChannelPromise syncUninterruptibly() {
+    public VoidChannelPromise syncUninterruptibly() {
         fail();
         return this;
     }
     @Override
-    public void setFailure(Throwable cause) {
+    public VoidChannelPromise setFailure(Throwable cause) {
+        fireException(cause);
+        return this;
     }
 
     @Override
-    public void setSuccess() {
+    public VoidChannelPromise setSuccess() {
+        return this;
     }
 
     @Override
     public boolean tryFailure(Throwable cause) {
+        fireException(cause);
+        return false;
+    }
+
+    @Override
+    public boolean cancel(boolean mayInterruptIfRunning) {
         return false;
     }
 
@@ -146,5 +176,51 @@ final class VoidChannelPromise implements ChannelFuture.Unsafe, ChannelPromise {
 
     private static void fail() {
         throw new IllegalStateException("void future");
+    }
+
+    @Override
+    public VoidChannelPromise setSuccess(Void result) {
+        return this;
+    }
+
+    @Override
+    public boolean trySuccess(Void result) {
+        return false;
+    }
+
+    @Override
+    public Void getNow() {
+        return null;
+    }
+
+    @Override
+    public ChannelPromise unvoid() {
+        ChannelPromise promise = new DefaultChannelPromise(channel);
+        if (fireException) {
+            promise.addListener(new ChannelFutureListener() {
+                @Override
+                public void operationComplete(ChannelFuture future) throws Exception {
+                    if (!future.isSuccess()) {
+                        fireException(future.cause());
+                    }
+                }
+            });
+        }
+        return promise;
+    }
+
+    @Override
+    public boolean isVoid() {
+        return true;
+    }
+
+    private void fireException(Throwable cause) {
+        // Only fire the exception if the channel is open and registered
+        // if not the pipeline is not setup and so it would hit the tail
+        // of the pipeline.
+        // See https://github.com/netty/netty/issues/1517
+        if (fireException && channel.isRegistered()) {
+            channel.pipeline().fireExceptionCaught(cause);
+        }
     }
 }

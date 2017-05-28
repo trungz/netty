@@ -15,10 +15,6 @@
  */
 package io.netty.channel;
 
-import io.netty.buffer.BufType;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.MessageBuf;
-
 import java.net.SocketAddress;
 
 /**
@@ -27,31 +23,19 @@ import java.net.SocketAddress;
  * <ul>
  * <li>{@link #connect(SocketAddress, ChannelPromise)}</li>
  * <li>{@link #disconnect(ChannelPromise)}</li>
- * <li>{@link #flush(ChannelPromise)}</li>
+ * <li>{@link #write(Object, ChannelPromise)}</li>
+ * <li>{@link #flush()}</li>
  * <li>and the shortcut methods which calls the methods mentioned above
  * </ul>
  */
 public abstract class AbstractServerChannel extends AbstractChannel implements ServerChannel {
-
-    private static final ChannelMetadata METADATA = new ChannelMetadata(BufType.MESSAGE, false);
+    private static final ChannelMetadata METADATA = new ChannelMetadata(false, 16);
 
     /**
      * Creates a new instance.
      */
-    protected AbstractServerChannel(Integer id) {
-        super(null, id);
-    }
-
-    @Override
-    public ByteBuf outboundByteBuffer() {
-        throw new NoSuchBufferException(String.format(
-                "%s does not have an outbound buffer.", ServerChannel.class.getSimpleName()));
-    }
-
-    @Override
-    public <T> MessageBuf<T> outboundMessageBuffer() {
-        throw new NoSuchBufferException(String.format(
-                "%s does not have an outbound buffer.", ServerChannel.class.getSimpleName()));
+    protected AbstractServerChannel() {
+        super(null);
     }
 
     @Override
@@ -75,50 +59,24 @@ public abstract class AbstractServerChannel extends AbstractChannel implements S
     }
 
     @Override
-    protected boolean isFlushPending() {
-        return false;
-    }
-
-    @Override
     protected AbstractUnsafe newUnsafe() {
         return new DefaultServerUnsafe();
     }
 
+    @Override
+    protected void doWrite(ChannelOutboundBuffer in) throws Exception {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    protected final Object filterOutboundMessage(Object msg) {
+        throw new UnsupportedOperationException();
+    }
+
     private final class DefaultServerUnsafe extends AbstractUnsafe {
         @Override
-        public void flush(final ChannelPromise future) {
-            if (eventLoop().inEventLoop()) {
-                reject(future);
-            } else {
-                eventLoop().execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        flush(future);
-                    }
-                });
-            }
-        }
-
-        @Override
-        public void connect(
-                final SocketAddress remoteAddress, final SocketAddress localAddress,
-                final ChannelPromise future) {
-            if (eventLoop().inEventLoop()) {
-                reject(future);
-            } else {
-                eventLoop().execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        connect(remoteAddress, localAddress, future);
-                    }
-                });
-            }
-        }
-
-        private void reject(ChannelPromise future) {
-            Exception cause = new UnsupportedOperationException();
-            future.setFailure(cause);
-            pipeline().fireExceptionCaught(cause);
+        public void connect(SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise) {
+            safeSetFailure(promise, new UnsupportedOperationException());
         }
     }
 }

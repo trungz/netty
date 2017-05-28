@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2013 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -48,7 +48,7 @@ public class DefaultSpdyGoAwayFrame implements SpdyGoAwayFrame {
      * Creates a new instance.
      *
      * @param lastGoodStreamId the Last-good-stream-ID of this frame
-     * @param status           the getStatus of this frame
+     * @param status           the status of this frame
      */
     public DefaultSpdyGoAwayFrame(int lastGoodStreamId, SpdySessionStatus status) {
         setLastGoodStreamId(lastGoodStreamId);
@@ -56,7 +56,7 @@ public class DefaultSpdyGoAwayFrame implements SpdyGoAwayFrame {
     }
 
     @Override
-    public int getLastGoodStreamId() {
+    public int lastGoodStreamId() {
         return lastGoodStreamId;
     }
 
@@ -71,7 +71,7 @@ public class DefaultSpdyGoAwayFrame implements SpdyGoAwayFrame {
     }
 
     @Override
-    public SpdySessionStatus getStatus() {
+    public SpdySessionStatus status() {
         return status;
     }
 
@@ -83,14 +83,14 @@ public class DefaultSpdyGoAwayFrame implements SpdyGoAwayFrame {
 
     @Override
     public String toString() {
-        StringBuilder buf = new StringBuilder();
-        buf.append(getClass().getSimpleName());
-        buf.append(StringUtil.NEWLINE);
-        buf.append("--> Last-good-stream-ID = ");
-        buf.append(lastGoodStreamId);
-        buf.append(StringUtil.NEWLINE);
-        buf.append("--> Status: ");
-        buf.append(status.toString());
-        return buf.toString();
+        return new StringBuilder()
+            .append(StringUtil.simpleClassName(this))
+            .append(StringUtil.NEWLINE)
+            .append("--> Last-good-stream-ID = ")
+            .append(lastGoodStreamId())
+            .append(StringUtil.NEWLINE)
+            .append("--> Status: ")
+            .append(status())
+            .toString();
     }
 }

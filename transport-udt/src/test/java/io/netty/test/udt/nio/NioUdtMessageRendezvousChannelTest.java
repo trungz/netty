@@ -19,66 +19,74 @@ package io.netty.test.udt.nio;
 import com.yammer.metrics.Metrics;
 import com.yammer.metrics.core.Meter;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.BufType;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.udt.nio.NioUdtMessageRendezvousChannel;
-import io.netty.test.udt.util.BootHelp;
+import io.netty.channel.udt.nio.NioUdtProvider;
 import io.netty.test.udt.util.EchoMessageHandler;
 import io.netty.test.udt.util.UnitHelp;
-
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
+import org.junit.Ignore;
 import org.junit.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.*;
 
 public class NioUdtMessageRendezvousChannelTest extends AbstractUdtTest {
 
-    protected static final Logger log = LoggerFactory.getLogger(NioUdtByteAcceptorChannelTest.class);
+    private static final InternalLogger log = InternalLoggerFactory.getInstance(NioUdtByteAcceptorChannelTest.class);
 
     /**
      * verify channel meta data
      */
     @Test
     public void metadata() throws Exception {
-
-        assertEquals(BufType.MESSAGE, new NioUdtMessageRendezvousChannel()
-                .metadata().bufferType());
-
+        assertFalse(new NioUdtMessageRendezvousChannel().metadata().hasDisconnect());
     }
 
     /**
      * verify basic echo message rendezvous
+     *
+     * FIXME: Re-enable after making it pass on Windows without unncessary tight loop.
+     *        https://github.com/netty/netty/issues/2853
      */
     @Test(timeout = 10 * 1000)
+    @Ignore
     public void basicEcho() throws Exception {
 
         final int messageSize = 64 * 1024;
         final int transferLimit = messageSize * 16;
 
         final Meter rate1 = Metrics.newMeter(
-                NioUdtMessageRendezvousChannelTest.class, "send rate", "bytes",
-                TimeUnit.SECONDS);
+                NioUdtMessageRendezvousChannelTest.class, "send rate", "bytes", TimeUnit.SECONDS);
 
         final Meter rate2 = Metrics.newMeter(
-                NioUdtMessageRendezvousChannelTest.class, "send rate", "bytes",
-                TimeUnit.SECONDS);
+                NioUdtMessageRendezvousChannelTest.class, "send rate", "bytes", TimeUnit.SECONDS);
 
         final InetSocketAddress addr1 = UnitHelp.localSocketAddress();
         final InetSocketAddress addr2 = UnitHelp.localSocketAddress();
 
-        final EchoMessageHandler handler1 = new EchoMessageHandler(rate1,
-                messageSize);
-        final EchoMessageHandler handler2 = new EchoMessageHandler(rate2,
-                messageSize);
+        final EchoMessageHandler handler1 = new EchoMessageHandler(rate1, messageSize);
+        final EchoMessageHandler handler2 = new EchoMessageHandler(rate2, messageSize);
 
-        final Bootstrap boot1 = BootHelp
-                .messagePeerBoot(addr1, addr2, handler1);
-        final Bootstrap boot2 = BootHelp
-                .messagePeerBoot(addr2, addr1, handler2);
+        final NioEventLoopGroup group1 = new NioEventLoopGroup(
+                1, Executors.defaultThreadFactory(), NioUdtProvider.MESSAGE_PROVIDER);
+        final NioEventLoopGroup group2 = new NioEventLoopGroup(
+                1, Executors.defaultThreadFactory(), NioUdtProvider.MESSAGE_PROVIDER);
+
+        final Bootstrap boot1 = new Bootstrap();
+        boot1.group(group1)
+             .channelFactory(NioUdtProvider.MESSAGE_RENDEZVOUS)
+             .localAddress(addr1).remoteAddress(addr2).handler(handler1);
+
+        final Bootstrap boot2 = new Bootstrap();
+        boot2.group(group2)
+             .channelFactory(NioUdtProvider.MESSAGE_RENDEZVOUS)
+             .localAddress(addr2).remoteAddress(addr1).handler(handler2);
 
         final ChannelFuture connectFuture1 = boot1.connect();
         final ChannelFuture connectFuture2 = boot2.connect();
@@ -86,27 +94,27 @@ public class NioUdtMessageRendezvousChannelTest extends AbstractUdtTest {
         while (handler1.meter().count() < transferLimit
                 && handler2.meter().count() < transferLimit) {
 
-            NioUdtByteAcceptorChannelTest.log.info("progress : {} {}", handler1.meter().count(), handler2
+            log.info("progress : {} {}", handler1.meter().count(), handler2
                     .meter().count());
 
             Thread.sleep(1000);
-
         }
 
         connectFuture1.channel().close().sync();
         connectFuture2.channel().close().sync();
 
-        NioUdtByteAcceptorChannelTest.log.info("handler1 : {}", handler1.meter().count());
-        NioUdtByteAcceptorChannelTest.log.info("handler2 : {}", handler2.meter().count());
+        log.info("handler1 : {}", handler1.meter().count());
+        log.info("handler2 : {}", handler2.meter().count());
 
         assertTrue(handler1.meter().count() >= transferLimit);
         assertTrue(handler2.meter().count() >= transferLimit);
 
         assertEquals(handler1.meter().count(), handler2.meter().count());
 
-        boot1.shutdown();
-        boot2.shutdown();
+        group1.shutdownGracefully();
+        group2.shutdownGracefully();
 
+        group1.terminationFuture().sync();
+        group2.terminationFuture().sync();
     }
-
 }

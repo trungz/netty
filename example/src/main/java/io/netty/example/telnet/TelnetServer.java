@@ -16,40 +16,46 @@
 package io.netty.example.telnet;
 
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.logging.LogLevel;
+import io.netty.handler.logging.LoggingHandler;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.SelfSignedCertificate;
 
 /**
  * Simplistic telnet server.
  */
-public class TelnetServer {
+public final class TelnetServer {
 
-    private final int port;
-
-    public TelnetServer(int port) {
-        this.port = port;
-    }
-
-    public void run() throws Exception {
-        ServerBootstrap b = new ServerBootstrap();
-        try {
-            b.group(new NioEventLoopGroup(), new NioEventLoopGroup())
-             .channel(NioServerSocketChannel.class)
-             .childHandler(new TelnetServerPipelineFactory());
-
-            b.bind(port).sync().channel().closeFuture().sync();
-        } finally {
-            b.shutdown();
-        }
-    }
+    static final boolean SSL = System.getProperty("ssl") != null;
+    static final int PORT = Integer.parseInt(System.getProperty("port", SSL? "8992" : "8023"));
 
     public static void main(String[] args) throws Exception {
-        int port;
-        if (args.length > 0) {
-            port = Integer.parseInt(args[0]);
+        // Configure SSL.
+        final SslContext sslCtx;
+        if (SSL) {
+            SelfSignedCertificate ssc = new SelfSignedCertificate();
+            sslCtx = SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey()).build();
         } else {
-            port = 8080;
+            sslCtx = null;
         }
-        new TelnetServer(port).run();
+
+        EventLoopGroup bossGroup = new NioEventLoopGroup(1);
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        try {
+            ServerBootstrap b = new ServerBootstrap();
+            b.group(bossGroup, workerGroup)
+             .channel(NioServerSocketChannel.class)
+             .handler(new LoggingHandler(LogLevel.INFO))
+             .childHandler(new TelnetServerInitializer(sslCtx));
+
+            b.bind(PORT).sync().channel().closeFuture().sync();
+        } finally {
+            bossGroup.shutdownGracefully();
+            workerGroup.shutdownGracefully();
+        }
     }
 }

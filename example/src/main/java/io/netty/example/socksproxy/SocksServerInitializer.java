@@ -16,20 +16,17 @@
 package io.netty.example.socksproxy;
 
 import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.socks.SocksInitRequestDecoder;
-import io.netty.handler.codec.socks.SocksMessageEncoder;
+import io.netty.handler.codec.socksx.SocksPortUnificationServerHandler;
+import io.netty.handler.logging.LogLevel;
+import io.netty.handler.logging.LoggingHandler;
 
 public final class SocksServerInitializer extends ChannelInitializer<SocketChannel> {
-    private final SocksMessageEncoder socksMessageEncoder = new SocksMessageEncoder();
-    private final SocksServerHandler socksServerHandler = new SocksServerHandler();
-
     @Override
-    public void initChannel(SocketChannel socketChannel) throws Exception {
-        ChannelPipeline channelPipeline = socketChannel.pipeline();
-        channelPipeline.addLast(SocksInitRequestDecoder.getName(), new SocksInitRequestDecoder());
-        channelPipeline.addLast(SocksMessageEncoder.getName(), socksMessageEncoder);
-        channelPipeline.addLast(SocksServerHandler.getName(), socksServerHandler);
+    public void initChannel(SocketChannel ch) throws Exception {
+        ch.pipeline().addLast(
+                new LoggingHandler(LogLevel.DEBUG),
+                new SocksPortUnificationServerHandler(),
+                SocksServerHandler.INSTANCE);
     }
 }

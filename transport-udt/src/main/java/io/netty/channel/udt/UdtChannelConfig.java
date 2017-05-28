@@ -15,13 +15,15 @@
  */
 package io.netty.channel.udt;
 
+import com.barchart.udt.OptionUDT;
+import com.barchart.udt.TypeUDT;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelOption;
-
-import com.barchart.udt.OptionUDT;
-import com.barchart.udt.TypeUDT;
-import com.barchart.udt.nio.KindUDT;
+import io.netty.channel.MessageSizeEstimator;
+import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
 
 /**
  * A {@link ChannelConfig} for a {@link UdtChannel}.
@@ -35,30 +37,30 @@ import com.barchart.udt.nio.KindUDT;
  * <th>Name</th>
  * <th>Associated setter method</th>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#SO_REUSEADDR}</td><td>{@link #setReuseAddress(boolean)}</td>
+ * <td>{@link ChannelOption#SO_REUSEADDR}</td><td>{@link #setReuseAddress(boolean)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#SO_RCVBUF}</td><td>{@link #setReceiveBufferSize(int)}</td>
+ * <td>{@link ChannelOption#SO_RCVBUF}</td><td>{@link #setReceiveBufferSize(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#SO_SNDBUF}</td><td>{@link #setSendBufferSize(int)}</td>
+ * <td>{@link ChannelOption#SO_SNDBUF}</td><td>{@link #setSendBufferSize(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#SO_REUSEADDR}</td><td>{@link #setReuseAddress(boolean)}</td>
+ * <td>{@link ChannelOption#SO_REUSEADDR}</td><td>{@link #setReuseAddress(boolean)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#SO_LINGER}</td><td>{@link #setSoLinger(int)}</td>
+ * <td>{@link ChannelOption#SO_LINGER}</td><td>{@link #setSoLinger(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#SO_RCVBUF}</td><td>{@link #setReceiveBufferSize(int)}</td>
+ * <td>{@link ChannelOption#SO_RCVBUF}</td><td>{@link #setReceiveBufferSize(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.ChannelOption#SO_SNDBUF}</td><td>{@link #setSendBufferSize(int)}</td>
+ * <td>{@link ChannelOption#SO_SNDBUF}</td><td>{@link #setSendBufferSize(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.udt.UdtChannelOption#PROTOCOL_RECEIVE_BUFFER_SIZE}</td>
+ * <td>{@link UdtChannelOption#PROTOCOL_RECEIVE_BUFFER_SIZE}</td>
  * <td>{@link #setProtocolReceiveBufferSize(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.udt.UdtChannelOption#PROTOCOL_SEND_BUFFER_SIZE}</td>
+ * <td>{@link UdtChannelOption#PROTOCOL_SEND_BUFFER_SIZE}</td>
  * <td>{@link #setProtocolSendBufferSize(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.udt.UdtChannelOption#SYSTEM_RECEIVE_BUFFER_SIZE}</td>
+ * <td>{@link UdtChannelOption#SYSTEM_RECEIVE_BUFFER_SIZE}</td>
  * <td>{@link #setSystemReceiveBufferSize(int)}</td>
  * </tr><tr>
- * <td>{@link io.netty.channel.udt.UdtChannelOption#SYSTEM_SEND_BUFFER_SIZE}</td>
+ * <td>{@link UdtChannelOption#SYSTEM_SEND_BUFFER_SIZE}</td>
  * <td>{@link #setSystemSendBufferSize(int)}</td>
 
  * </tr>
@@ -68,7 +70,10 @@ import com.barchart.udt.nio.KindUDT;
  * {@code "receiveBufferSize"} and {@code "sendBufferSize"} as maximum message
  * size. If received or sent message does not fit specified sizes,
  * {@link ChannelException} will be thrown.
+ *
+ * @deprecated The UDT transport is no longer maintained and will be removed.
  */
+@Deprecated
 public interface UdtChannelConfig extends ChannelConfig {
 
     /**
@@ -111,6 +116,40 @@ public interface UdtChannelConfig extends ChannelConfig {
      */
     boolean isReuseAddress();
 
+    @Override
+    UdtChannelConfig setConnectTimeoutMillis(int connectTimeoutMillis);
+
+    @Override
+    @Deprecated
+    UdtChannelConfig setMaxMessagesPerRead(int maxMessagesPerRead);
+
+    @Override
+    UdtChannelConfig setWriteSpinCount(int writeSpinCount);
+
+    @Override
+    UdtChannelConfig setAllocator(ByteBufAllocator allocator);
+
+    @Override
+    UdtChannelConfig setRecvByteBufAllocator(RecvByteBufAllocator allocator);
+
+    @Override
+    UdtChannelConfig setAutoRead(boolean autoRead);
+
+    @Override
+    UdtChannelConfig setAutoClose(boolean autoClose);
+
+    @Override
+    UdtChannelConfig setWriteBufferHighWaterMark(int writeBufferHighWaterMark);
+
+    @Override
+    UdtChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark);
+
+    @Override
+    UdtChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark);
+
+    @Override
+    UdtChannelConfig setMessageSizeEstimator(MessageSizeEstimator estimator);
+
     /**
      * Sets {@link OptionUDT#Protocol_Receive_Buffer_Size}
      */
@@ -150,5 +189,4 @@ public interface UdtChannelConfig extends ChannelConfig {
      * Sets {@link OptionUDT#System_Send_Buffer_Size}
      */
     UdtChannelConfig setSystemSendBufferSize(int size);
-
 }

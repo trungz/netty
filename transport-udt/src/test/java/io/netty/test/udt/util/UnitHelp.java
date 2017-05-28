@@ -18,8 +18,10 @@ package io.netty.test.udt.util;
 
 import com.barchart.udt.SocketUDT;
 import com.barchart.udt.StatusUDT;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.SocketUtils;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.io.File;
 import java.net.InetAddress;
@@ -37,23 +39,23 @@ import java.util.regex.Pattern;
  */
 public final class UnitHelp {
 
-    private static final Logger log = LoggerFactory.getLogger(UnitHelp.class);
+    private static final InternalLogger log = InternalLoggerFactory.getInstance(UnitHelp.class);
     private static final Pattern SPACES = Pattern.compile("\\s+");
 
     /**
      * Verify class loading with class initialization.
      */
     public static boolean canLoadAndInitClass(String name) {
-        try{
+        try {
             Class.forName(name, true, UnitHelp.class.getClassLoader());
             log.info("Class load and init success.");
             return true;
-        } catch(Throwable e){
+        } catch (Throwable e) {
             log.warn("Class load or init failure.", e);
             return false;
         }
     }
-    
+
     /**
      * Zero out buffer.
      */
@@ -86,9 +88,7 @@ public final class UnitHelp {
 
         final long timeFinish = System.currentTimeMillis();
 
-        final long timeDiff = timeFinish - timeStart;
-
-        return timeDiff;
+        return timeFinish - timeStart;
     }
 
     /**
@@ -107,11 +107,11 @@ public final class UnitHelp {
             final String host) {
         ServerSocket socket = null;
         try {
-            final InetAddress address = InetAddress.getByName(host);
+            final InetAddress address = SocketUtils.addressByName(host);
             socket = new ServerSocket(0, 3, address);
             return (InetSocketAddress) socket.getLocalSocketAddress();
         } catch (final Exception e) {
-            log.error("Failed to find addess.");
+            log.error("Failed to find address.");
             return null;
         } finally {
             if (socket != null) {
@@ -192,11 +192,11 @@ public final class UnitHelp {
      * Display current OS/ARCH.
      */
     public static void logOsArch() {
-        final StringBuilder text = new StringBuilder(1024);
-        text.append("\n\t");
-        text.append(System.getProperty("os.name"));
-        text.append("\n\t");
-        text.append(System.getProperty("os.arch"));
+        final StringBuilder text = new StringBuilder(1024)
+            .append("\n\t")
+            .append(System.getProperty("os.name"))
+            .append("\n\t")
+            .append(System.getProperty("os.arch"));
         log.info("\n\t[os/arch]{}", text);
     }
 
@@ -204,7 +204,7 @@ public final class UnitHelp {
      * Display contents of a set.
      */
     public static void logSet(final Set<?> set) {
-        @SuppressWarnings({ "rawtypes", "unchecked" })
+        @SuppressWarnings("unchecked")
         final TreeSet<?> treeSet = new TreeSet(set);
         for (final Object item : treeSet) {
             log.info("-> {}", item);
@@ -222,7 +222,7 @@ public final class UnitHelp {
 
     public static int[] randomIntArray(final int length, final int range) {
         final int[] array = new int[length];
-        final Random generator = new Random(0);
+        final Random generator = PlatformDependent.threadLocalRandom();
         for (int i = 0; i < array.length; i++) {
             array[i] = generator.nextInt(range);
         }

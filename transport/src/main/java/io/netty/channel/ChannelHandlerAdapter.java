@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2013 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -13,112 +13,77 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  */
+
 package io.netty.channel;
 
-import java.net.SocketAddress;
+import io.netty.util.internal.InternalThreadLocalMap;
+
+import java.util.Map;
 
 /**
- * {@link ChannelHandler} implementation which represents a combination out of a {@link ChannelStateHandler} and
- * the {@link ChannelOperationHandler}.
- *
- * It is a good starting point if your {@link ChannelHandler} implementation needs to intercept operations and also
- * state updates.
+ * Skeleton implementation of a {@link ChannelHandler}.
  */
-public abstract class ChannelHandlerAdapter extends ChannelStateHandlerAdapter implements ChannelOperationHandler {
+public abstract class ChannelHandlerAdapter implements ChannelHandler {
+
+    // Not using volatile because it's used only for a sanity check.
+    boolean added;
 
     /**
-     * Calls {@link ChannelHandlerContext#bind(SocketAddress, ChannelPromise)} to forward
-     * to the next {@link ChannelOperationHandler} in the {@link ChannelPipeline}.
-     *
-     * Sub-classes may override this method to change behavior.
+     * Throws {@link IllegalStateException} if {@link ChannelHandlerAdapter#isSharable()} returns {@code true}
      */
-    @Override
-    public void bind(ChannelHandlerContext ctx, SocketAddress localAddress,
-                     ChannelPromise future) throws Exception {
-        ctx.bind(localAddress, future);
-    }
-
-    /**
-     * Calls {@link ChannelHandlerContext#connect(SocketAddress, SocketAddress, ChannelPromise)} to forward
-     * to the next {@link ChannelOperationHandler} in the {@link ChannelPipeline}.
-     *
-     * Sub-classes may override this method to change behavior.
-     */
-    @Override
-    public void connect(ChannelHandlerContext ctx, SocketAddress remoteAddress,
-                        SocketAddress localAddress, ChannelPromise future) throws Exception {
-        ctx.connect(remoteAddress, localAddress, future);
-    }
-
-    /**
-     * Calls {@link ChannelHandlerContext#disconnect(ChannelPromise)} to forward
-     * to the next {@link ChannelOperationHandler} in the {@link ChannelPipeline}.
-     *
-     * Sub-classes may override this method to change behavior.
-     */
-    @Override
-    public void disconnect(ChannelHandlerContext ctx, ChannelPromise future)
-            throws Exception {
-        ctx.disconnect(future);
-    }
-
-    /**
-     * Calls {@link ChannelHandlerContext#close(ChannelPromise)} to forward
-     * to the next {@link ChannelOperationHandler} in the {@link ChannelPipeline}.
-     *
-     * Sub-classes may override this method to change behavior.
-     */
-    @Override
-    public void close(ChannelHandlerContext ctx, ChannelPromise future)
-            throws Exception {
-        ctx.close(future);
-    }
-
-    /**
-     * Calls {@link ChannelHandlerContext#close(ChannelPromise)} to forward
-     * to the next {@link ChannelOperationHandler} in the {@link ChannelPipeline}.
-     *
-     * Sub-classes may override this method to change behavior.
-     */
-    @Override
-    public void deregister(ChannelHandlerContext ctx, ChannelPromise future)
-            throws Exception {
-        ctx.deregister(future);
-    }
-
-    @Override
-    public void read(ChannelHandlerContext ctx) {
-        ctx.read();
-    }
-
-    /**
-     * Calls {@link ChannelHandlerContext#flush(ChannelPromise)} to forward
-     * to the next {@link ChannelOperationHandler} in the {@link ChannelPipeline}.
-     *
-     * Sub-classes may override this method to change behavior.
-     *
-     * Be aware that if your class also implement {@link ChannelOutboundHandler} it need to {@code @Override} this
-     * method and provide some proper implementation. Fail to do so, will result in an {@link IllegalStateException}!
-     */
-    @Override
-    public void flush(ChannelHandlerContext ctx, ChannelPromise future)
-            throws Exception {
-        if (this instanceof ChannelOutboundHandler) {
-            throw new IllegalStateException(
-                    "flush(...) must be overridden by " + getClass().getName() +
-                            ", which implements " + ChannelOutboundHandler.class.getSimpleName());
+    protected void ensureNotSharable() {
+        if (isSharable()) {
+            throw new IllegalStateException("ChannelHandler " + getClass().getName() + " is not allowed to be shared");
         }
-        ctx.flush(future);
     }
 
     /**
-     * Calls {@link ChannelHandlerContext#sendFile(FileRegion, ChannelPromise)} to forward
-     * to the next {@link ChannelOperationHandler} in the {@link ChannelPipeline}.
+     * Return {@code true} if the implementation is {@link Sharable} and so can be added
+     * to different {@link ChannelPipeline}s.
+     */
+    public boolean isSharable() {
+        /**
+         * Cache the result of {@link Sharable} annotation detection to workaround a condition. We use a
+         * {@link ThreadLocal} and {@link WeakHashMap} to eliminate the volatile write/reads. Using different
+         * {@link WeakHashMap} instances per {@link Thread} is good enough for us and the number of
+         * {@link Thread}s are quite limited anyway.
+         *
+         * See <a href="https://github.com/netty/netty/issues/2289">#2289</a>.
+         */
+        Class<?> clazz = getClass();
+        Map<Class<?>, Boolean> cache = InternalThreadLocalMap.get().handlerSharableCache();
+        Boolean sharable = cache.get(clazz);
+        if (sharable == null) {
+            sharable = clazz.isAnnotationPresent(Sharable.class);
+            cache.put(clazz, sharable);
+        }
+        return sharable;
+    }
+
+    /**
+     * Do nothing by default, sub-classes may override this method.
+     */
+    @Override
+    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+        // NOOP
+    }
+
+    /**
+     * Do nothing by default, sub-classes may override this method.
+     */
+    @Override
+    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
+        // NOOP
+    }
+
+    /**
+     * Calls {@link ChannelHandlerContext#fireExceptionCaught(Throwable)} to forward
+     * to the next {@link ChannelHandler} in the {@link ChannelPipeline}.
      *
      * Sub-classes may override this method to change behavior.
      */
     @Override
-    public void sendFile(ChannelHandlerContext ctx, FileRegion region, ChannelPromise future) throws Exception {
-        ctx.sendFile(region, future);
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        ctx.fireExceptionCaught(cause);
     }
 }

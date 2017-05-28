@@ -18,6 +18,10 @@ package io.netty.util;
 
 import java.util.Arrays;
 
+/**
+ * @deprecated This class will be removed in the future version.
+ */
+@Deprecated
 public class ResourceLeakException extends RuntimeException {
 
     private static final long serialVersionUID = 7186453858343358280L;

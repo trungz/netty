@@ -56,7 +56,7 @@ public class HttpRequestDecoder extends HttpObjectDecoder {
 
     /**
      * Creates a new instance with the default
-     * {@code maxInitialLineLength (4096}}, {@code maxHeaderSize (8192)}, and
+     * {@code maxInitialLineLength (4096)}, {@code maxHeaderSize (8192)}, and
      * {@code maxChunkSize (8192)}.
      */
     public HttpRequestDecoder() {
@@ -70,15 +70,27 @@ public class HttpRequestDecoder extends HttpObjectDecoder {
         super(maxInitialLineLength, maxHeaderSize, maxChunkSize, true);
     }
 
+    public HttpRequestDecoder(
+            int maxInitialLineLength, int maxHeaderSize, int maxChunkSize, boolean validateHeaders) {
+        super(maxInitialLineLength, maxHeaderSize, maxChunkSize, true, validateHeaders);
+    }
+
+    public HttpRequestDecoder(
+            int maxInitialLineLength, int maxHeaderSize, int maxChunkSize, boolean validateHeaders,
+            int initialBufferSize) {
+        super(maxInitialLineLength, maxHeaderSize, maxChunkSize, true, validateHeaders, initialBufferSize);
+    }
+
     @Override
     protected HttpMessage createMessage(String[] initialLine) throws Exception {
         return new DefaultHttpRequest(
-                HttpVersion.valueOf(initialLine[2]), HttpMethod.valueOf(initialLine[0]), initialLine[1]);
+                HttpVersion.valueOf(initialLine[2]),
+                HttpMethod.valueOf(initialLine[0]), initialLine[1], validateHeaders);
     }
 
     @Override
     protected HttpMessage createInvalidMessage() {
-        return new DefaultHttpRequest(HttpVersion.HTTP_1_0, HttpMethod.GET, "/bad-request");
+        return new DefaultFullHttpRequest(HttpVersion.HTTP_1_0, HttpMethod.GET, "/bad-request", validateHeaders);
     }
 
     @Override

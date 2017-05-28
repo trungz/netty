@@ -30,24 +30,19 @@ public class DefaultSpdySettingsFrame implements SpdySettingsFrame {
     private final Map<Integer, Setting> settingsMap = new TreeMap<Integer, Setting>();
 
     @Override
-    public Set<Integer> getIds() {
+    public Set<Integer> ids() {
         return settingsMap.keySet();
     }
 
     @Override
     public boolean isSet(int id) {
-        Integer key = Integer.valueOf(id);
-        return settingsMap.containsKey(key);
+        return settingsMap.containsKey(id);
     }
 
     @Override
     public int getValue(int id) {
-        Integer key = Integer.valueOf(id);
-        if (settingsMap.containsKey(key)) {
-            return settingsMap.get(key).getValue();
-        } else {
-            return -1;
-        }
+        final Setting setting = settingsMap.get(id);
+        return setting != null ? setting.getValue() : -1;
     }
 
     @Override
@@ -57,12 +52,12 @@ public class DefaultSpdySettingsFrame implements SpdySettingsFrame {
 
     @Override
     public SpdySettingsFrame setValue(int id, int value, boolean persistValue, boolean persisted) {
-        if (id <= 0 || id > SpdyCodecUtil.SPDY_SETTINGS_MAX_ID) {
+        if (id < 0 || id > SpdyCodecUtil.SPDY_SETTINGS_MAX_ID) {
             throw new IllegalArgumentException("Setting ID is not valid: " + id);
         }
-        Integer key = Integer.valueOf(id);
-        if (settingsMap.containsKey(key)) {
-            Setting setting = settingsMap.get(key);
+        final Integer key = Integer.valueOf(id);
+        final Setting setting = settingsMap.get(key);
+        if (setting != null) {
             setting.setValue(value);
             setting.setPersist(persistValue);
             setting.setPersisted(persisted);
@@ -74,47 +69,36 @@ public class DefaultSpdySettingsFrame implements SpdySettingsFrame {
 
     @Override
     public SpdySettingsFrame removeValue(int id) {
-        Integer key = Integer.valueOf(id);
-        if (settingsMap.containsKey(key)) {
-            settingsMap.remove(key);
-        }
+        settingsMap.remove(id);
         return this;
     }
 
     @Override
     public boolean isPersistValue(int id) {
-        Integer key = Integer.valueOf(id);
-        if (settingsMap.containsKey(key)) {
-            return settingsMap.get(key).isPersist();
-        } else {
-            return false;
-        }
+        final Setting setting = settingsMap.get(id);
+        return setting != null && setting.isPersist();
     }
 
     @Override
     public SpdySettingsFrame setPersistValue(int id, boolean persistValue) {
-        Integer key = Integer.valueOf(id);
-        if (settingsMap.containsKey(key)) {
-            settingsMap.get(key).setPersist(persistValue);
+        final Setting setting = settingsMap.get(id);
+        if (setting != null) {
+            setting.setPersist(persistValue);
         }
         return this;
     }
 
     @Override
     public boolean isPersisted(int id) {
-        Integer key = Integer.valueOf(id);
-        if (settingsMap.containsKey(key)) {
-            return settingsMap.get(key).isPersisted();
-        } else {
-            return false;
-        }
+        final Setting setting = settingsMap.get(id);
+        return setting != null && setting.isPersisted();
     }
 
     @Override
     public SpdySettingsFrame setPersisted(int id, boolean persisted) {
-        Integer key = Integer.valueOf(id);
-        if (settingsMap.containsKey(key)) {
-            settingsMap.get(key).setPersisted(persisted);
+        final Setting setting = settingsMap.get(id);
+        if (setting != null) {
+            setting.setPersisted(persisted);
         }
         return this;
     }
@@ -138,7 +122,7 @@ public class DefaultSpdySettingsFrame implements SpdySettingsFrame {
         for (Map.Entry<Integer, Setting> e: getSettings()) {
             Setting setting = e.getValue();
             buf.append("--> ");
-            buf.append(e.getKey().toString());
+            buf.append(e.getKey());
             buf.append(':');
             buf.append(setting.getValue());
             buf.append(" (persist value: ");
@@ -152,10 +136,11 @@ public class DefaultSpdySettingsFrame implements SpdySettingsFrame {
 
     @Override
     public String toString() {
-        StringBuilder buf = new StringBuilder();
-        buf.append(getClass().getSimpleName());
-        buf.append(StringUtil.NEWLINE);
+        StringBuilder buf = new StringBuilder()
+            .append(StringUtil.simpleClassName(this))
+            .append(StringUtil.NEWLINE);
         appendSettings(buf);
+
         buf.setLength(buf.length() - StringUtil.NEWLINE.length());
         return buf.toString();
     }

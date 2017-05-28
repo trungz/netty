@@ -15,46 +15,37 @@
  */
 package io.netty.channel.local;
 
-import io.netty.channel.EventExecutor;
-import io.netty.channel.MultithreadEventLoopGroup;
-import io.netty.channel.ChannelTaskScheduler;
+import io.netty.channel.DefaultEventLoopGroup;
 
 import java.util.concurrent.ThreadFactory;
 
 /**
- * {@link MultithreadEventLoopGroup} which must be used for the local transport.
+ * @deprecated Use {@link DefaultEventLoopGroup} instead.
  */
-public class LocalEventLoopGroup extends MultithreadEventLoopGroup {
+@Deprecated
+public class LocalEventLoopGroup extends DefaultEventLoopGroup {
 
     /**
-     * Create a new instance which used {@link #DEFAULT_POOL_SIZE} number of Threads
+     * Create a new instance with the default number of threads.
      */
-    public LocalEventLoopGroup() {
-        this(0);
-    }
+    public LocalEventLoopGroup() { }
 
     /**
      * Create a new instance
      *
-     * @param nThreads          the number of Threads to use or {@code 0} for the default of {@link #DEFAULT_POOL_SIZE}
+     * @param nThreads          the number of threads to use
      */
     public LocalEventLoopGroup(int nThreads) {
-        this(nThreads, null);
+        super(nThreads);
     }
 
     /**
      * Create a new instance
      *
-     * @param nThreads          the number of Threads to use or {@code 0} for the default of {@link #DEFAULT_POOL_SIZE}
+     * @param nThreads          the number of threads to use
      * @param threadFactory     the {@link ThreadFactory} or {@code null} to use the default
      */
     public LocalEventLoopGroup(int nThreads, ThreadFactory threadFactory) {
         super(nThreads, threadFactory);
-    }
-
-    @Override
-    protected EventExecutor newChild(
-            ThreadFactory threadFactory, ChannelTaskScheduler scheduler, Object... args) throws Exception {
-        return new LocalEventLoop(this, threadFactory, scheduler);
     }
 }

@@ -20,6 +20,7 @@ import io.netty.channel.ChannelException;
 import io.netty.handler.codec.http.HttpConstants;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
 
 import static io.netty.buffer.Unpooled.*;
 
@@ -29,11 +30,27 @@ import static io.netty.buffer.Unpooled.*;
 public class MemoryAttribute extends AbstractMemoryHttpData implements Attribute {
 
     public MemoryAttribute(String name) {
-        super(name, HttpConstants.DEFAULT_CHARSET, 0);
+        this(name, HttpConstants.DEFAULT_CHARSET);
+    }
+
+    public MemoryAttribute(String name, long definedSize) {
+        this(name, definedSize, HttpConstants.DEFAULT_CHARSET);
+    }
+
+    public MemoryAttribute(String name, Charset charset) {
+        super(name, charset, 0);
+    }
+
+    public MemoryAttribute(String name, long definedSize, Charset charset) {
+        super(name, charset, definedSize);
     }
 
     public MemoryAttribute(String name, String value) throws IOException {
-        super(name, HttpConstants.DEFAULT_CHARSET, 0); // Attribute have no default size
+        this(name, value, HttpConstants.DEFAULT_CHARSET); // Attribute have no default size
+    }
+
+    public MemoryAttribute(String name, String value, Charset charset) throws IOException {
+        super(name, charset, 0); // Attribute have no default size
         setValue(value);
     }
 
@@ -44,7 +61,7 @@ public class MemoryAttribute extends AbstractMemoryHttpData implements Attribute
 
     @Override
     public String getValue() {
-        return getByteBuf().toString(charset);
+        return getByteBuf().toString(getCharset());
     }
 
     @Override
@@ -52,7 +69,8 @@ public class MemoryAttribute extends AbstractMemoryHttpData implements Attribute
         if (value == null) {
             throw new NullPointerException("value");
         }
-        byte [] bytes = value.getBytes(charset.name());
+        byte [] bytes = value.getBytes(getCharset());
+        checkSize(bytes.length);
         ByteBuf buffer = wrappedBuffer(bytes);
         if (definedSize > 0) {
             definedSize = buffer.readableBytes();
@@ -63,6 +81,7 @@ public class MemoryAttribute extends AbstractMemoryHttpData implements Attribute
     @Override
     public void addContent(ByteBuf buffer, boolean last) throws IOException {
         int localsize = buffer.readableBytes();
+        checkSize(size + localsize);
         if (definedSize > 0 && definedSize < size + localsize) {
             definedSize = size + localsize;
         }
@@ -102,17 +121,72 @@ public class MemoryAttribute extends AbstractMemoryHttpData implements Attribute
     }
 
     @Override
-    public MemoryAttribute copy() {
+    public Attribute copy() {
+        final ByteBuf content = content();
+        return replace(content != null ? content.copy() : null);
+    }
+
+    @Override
+    public Attribute duplicate() {
+        final ByteBuf content = content();
+        return replace(content != null ? content.duplicate() : null);
+    }
+
+    @Override
+    public Attribute retainedDuplicate() {
+        ByteBuf content = content();
+        if (content != null) {
+            content = content.retainedDuplicate();
+            boolean success = false;
+            try {
+                Attribute duplicate = replace(content);
+                success = true;
+                return duplicate;
+            } finally {
+                if (!success) {
+                    content.release();
+                }
+            }
+        } else {
+            return replace(null);
+        }
+    }
+
+    @Override
+    public Attribute replace(ByteBuf content) {
         MemoryAttribute attr = new MemoryAttribute(getName());
         attr.setCharset(getCharset());
-        ByteBuf content = data();
         if (content != null) {
             try {
-                attr.setContent(content.copy());
+                attr.setContent(content);
             } catch (IOException e) {
                 throw new ChannelException(e);
             }
         }
         return attr;
+    }
+
+    @Override
+    public Attribute retain() {
+        super.retain();
+        return this;
+    }
+
+    @Override
+    public Attribute retain(int increment) {
+        super.retain(increment);
+        return this;
+    }
+
+    @Override
+    public Attribute touch() {
+        super.touch();
+        return this;
+    }
+
+    @Override
+    public Attribute touch(Object hint) {
+        super.touch(hint);
+        return this;
     }
 }

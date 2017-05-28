@@ -30,7 +30,7 @@ public interface LastHttpContent extends HttpContent {
     LastHttpContent EMPTY_LAST_CONTENT = new LastHttpContent() {
 
         @Override
-        public ByteBuf data() {
+        public ByteBuf content() {
             return Unpooled.EMPTY_BUFFER;
         }
 
@@ -40,13 +40,34 @@ public interface LastHttpContent extends HttpContent {
         }
 
         @Override
-        public HttpHeaders trailingHeaders() {
-            return HttpHeaders.EMPTY_HEADERS;
+        public LastHttpContent duplicate() {
+            return this;
         }
 
         @Override
-        public DecoderResult getDecoderResult() {
+        public LastHttpContent replace(ByteBuf content) {
+            return new DefaultLastHttpContent(content);
+        }
+
+        @Override
+        public LastHttpContent retainedDuplicate() {
+            return this;
+        }
+
+        @Override
+        public HttpHeaders trailingHeaders() {
+            return EmptyHttpHeaders.INSTANCE;
+        }
+
+        @Override
+        public DecoderResult decoderResult() {
             return DecoderResult.SUCCESS;
+        }
+
+        @Override
+        @Deprecated
+        public DecoderResult getDecoderResult() {
+            return decoderResult();
         }
 
         @Override
@@ -55,13 +76,43 @@ public interface LastHttpContent extends HttpContent {
         }
 
         @Override
-        public boolean isFreed() {
+        public int refCnt() {
+            return 1;
+        }
+
+        @Override
+        public LastHttpContent retain() {
+            return this;
+        }
+
+        @Override
+        public LastHttpContent retain(int increment) {
+            return this;
+        }
+
+        @Override
+        public LastHttpContent touch() {
+            return this;
+        }
+
+        @Override
+        public LastHttpContent touch(Object hint) {
+            return this;
+        }
+
+        @Override
+        public boolean release() {
             return false;
         }
 
         @Override
-        public void free() {
-            // NOOP
+        public boolean release(int decrement) {
+            return false;
+        }
+
+        @Override
+        public String toString() {
+            return "EmptyLastHttpContent";
         }
     };
 
@@ -69,4 +120,25 @@ public interface LastHttpContent extends HttpContent {
 
     @Override
     LastHttpContent copy();
+
+    @Override
+    LastHttpContent duplicate();
+
+    @Override
+    LastHttpContent retainedDuplicate();
+
+    @Override
+    LastHttpContent replace(ByteBuf content);
+
+    @Override
+    LastHttpContent retain(int increment);
+
+    @Override
+    LastHttpContent retain();
+
+    @Override
+    LastHttpContent touch();
+
+    @Override
+    LastHttpContent touch(Object hint);
 }

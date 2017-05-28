@@ -15,84 +15,96 @@
  */
 package io.netty.channel.oio;
 
-import io.netty.buffer.MessageBuf;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelPipeline;
+import io.netty.channel.RecvByteBufAllocator;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Abstract base class for OIO which reads and writes objects from/to a Socket
  */
 public abstract class AbstractOioMessageChannel extends AbstractOioChannel {
 
-    /**
-     * @see AbstractOioChannel#AbstractOioChannel(Channel, Integer)
-     */
-    protected AbstractOioMessageChannel(Channel parent, Integer id) {
-        super(parent, id);
+    private final List<Object> readBuf = new ArrayList<Object>();
+
+    protected AbstractOioMessageChannel(Channel parent) {
+        super(parent);
     }
 
     @Override
     protected void doRead() {
+        if (!readPending) {
+            // We have to check readPending here because the Runnable to read could have been scheduled and later
+            // during the same read loop readPending was set to false.
+            return;
+        }
+        // In OIO we should set readPending to false even if the read was not successful so we can schedule
+        // another read on the event loop if no reads are done.
+        readPending = false;
+
+        final ChannelConfig config = config();
         final ChannelPipeline pipeline = pipeline();
-        final MessageBuf<Object> msgBuf = pipeline.inboundMessageBuffer();
+        final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
+        allocHandle.reset(config);
+
         boolean closed = false;
-        boolean read = false;
-        boolean firedInboundBufferSuspended = false;
+        Throwable exception = null;
         try {
-            int localReadAmount = doReadMessages(msgBuf);
-            if (localReadAmount > 0) {
-                read = true;
-            } else if (localReadAmount < 0) {
+            do {
+                // Perform a read.
+                int localRead = doReadMessages(readBuf);
+                if (localRead == 0) {
+                    break;
+                }
+                if (localRead < 0) {
+                    closed = true;
+                    break;
+                }
+
+                allocHandle.incMessagesRead(localRead);
+            } while (allocHandle.continueReading());
+        } catch (Throwable t) {
+            exception = t;
+        }
+
+        boolean readData = false;
+        int size = readBuf.size();
+        if (size > 0) {
+            readData = true;
+            for (int i = 0; i < size; i++) {
+                readPending = false;
+                pipeline.fireChannelRead(readBuf.get(i));
+            }
+            readBuf.clear();
+            allocHandle.readComplete();
+            pipeline.fireChannelReadComplete();
+        }
+
+        if (exception != null) {
+            if (exception instanceof IOException) {
                 closed = true;
             }
-        } catch (Throwable t) {
-            if (read) {
-                read = false;
-                pipeline.fireInboundBufferUpdated();
-            }
-            firedInboundBufferSuspended = true;
-            pipeline.fireInboundBufferSuspended();
-            pipeline.fireExceptionCaught(t);
-            if (t instanceof IOException) {
-                unsafe().close(unsafe().voidFuture());
-            }
-        } finally {
-            if (read) {
-                pipeline.fireInboundBufferUpdated();
-            }
-            if (!firedInboundBufferSuspended) {
-                pipeline.fireInboundBufferSuspended();
-            }
-            if (closed && isOpen()) {
-                unsafe().close(unsafe().voidFuture());
-            }
-        }
-    }
 
-    @Override
-    protected void doFlushMessageBuffer(MessageBuf<Object> buf) throws Exception {
-        while (!buf.isEmpty()) {
-            doWriteMessages(buf);
+            pipeline.fireExceptionCaught(exception);
+        }
+
+        if (closed) {
+            if (isOpen()) {
+                unsafe().close(unsafe().voidPromise());
+            }
+        } else if (readPending || config.isAutoRead() || !readData && isActive()) {
+            // Reading 0 bytes could mean there is a SocketTimeout and no data was actually read, so we
+            // should execute read() again because no data may have been read.
+            read();
         }
     }
 
     /**
-     * Read Objects from the underlying Socket.
-     *
-     * @param buf           the {@link MessageBuf} into which the read objects will be written
-     * @return amount       the number of objects read. This may return a negative amount if the underlying
-     *                      Socket was closed
-     * @throws Exception    is thrown if an error accoured
+     * Read messages into the given array and return the amount which was read.
      */
-    protected abstract int doReadMessages(MessageBuf<Object> buf) throws Exception;
-
-    /**
-     * Write the Objects which is hold by the {@link MessageBuf} to the underlying Socket.
-     *
-     * @param buf           the {@link MessageBuf} which holds the data to transfer
-     * @throws Exception    is thrown if an error accoured
-     */
-    protected abstract void doWriteMessages(MessageBuf<Object> buf) throws Exception;
+    protected abstract int doReadMessages(List<Object> msgs) throws Exception;
 }

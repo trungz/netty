@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2014 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -15,787 +15,451 @@
  */
 package io.netty.handler.codec.spdy;
 
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_DATA_FLAG_FIN;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_DATA_FRAME;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_FLAG_FIN;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_FLAG_UNIDIRECTIONAL;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_GOAWAY_FRAME;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_HEADERS_FRAME;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_HEADER_FLAGS_OFFSET;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_HEADER_LENGTH_OFFSET;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_HEADER_SIZE;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_HEADER_TYPE_OFFSET;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_PING_FRAME;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_RST_STREAM_FRAME;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_SETTINGS_CLEAR;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_SETTINGS_FRAME;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_SETTINGS_PERSISTED;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_SETTINGS_PERSIST_VALUE;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_SYN_REPLY_FRAME;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_SYN_STREAM_FRAME;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.SPDY_WINDOW_UPDATE_FRAME;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.getSignedInt;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.getUnsignedInt;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.getUnsignedMedium;
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.getUnsignedShort;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.ByteToMessageDecoder;
-import io.netty.handler.codec.TooLongFrameException;
-
-import static io.netty.handler.codec.spdy.SpdyCodecUtil.*;
 
 /**
- * Decodes {@link ByteBuf}s into SPDY Data and Control Frames.
+ * Decodes {@link ByteBuf}s into SPDY Frames.
  */
-public class SpdyFrameDecoder extends ByteToMessageDecoder {
+public class SpdyFrameDecoder {
 
     private final int spdyVersion;
     private final int maxChunkSize;
-    private final int maxHeaderSize;
 
-    private final SpdyHeaderBlockDecompressor headerBlockDecompressor;
+    private final SpdyFrameDecoderDelegate delegate;
 
     private State state;
-    private SpdySettingsFrame spdySettingsFrame;
-    private SpdyHeaderBlock spdyHeaderBlock;
 
     // SPDY common header fields
     private byte flags;
     private int length;
-    private int version;
-    private int type;
-    private int streamID;
+    private int streamId;
 
-    // Header block decoding fields
-    private int headerSize;
-    private int numHeaders;
-    private ByteBuf decompressed;
+    private int numSettings;
 
     private enum State {
         READ_COMMON_HEADER,
-        READ_CONTROL_FRAME,
-        READ_SETTINGS_FRAME,
-        READ_HEADER_BLOCK_FRAME,
-        READ_HEADER_BLOCK,
         READ_DATA_FRAME,
+        READ_SYN_STREAM_FRAME,
+        READ_SYN_REPLY_FRAME,
+        READ_RST_STREAM_FRAME,
+        READ_SETTINGS_FRAME,
+        READ_SETTING,
+        READ_PING_FRAME,
+        READ_GOAWAY_FRAME,
+        READ_HEADERS_FRAME,
+        READ_WINDOW_UPDATE_FRAME,
+        READ_HEADER_BLOCK,
         DISCARD_FRAME,
         FRAME_ERROR
     }
 
     /**
-     * Creates a new instance with the specified {@code version} and the default
-     * {@code maxChunkSize (8192)} and {@code maxHeaderSize (16384)}.
+     * Creates a new instance with the specified {@code version}
+     * and the default {@code maxChunkSize (8192)}.
      */
-    public SpdyFrameDecoder(int version) {
-        this(version, 8192, 16384);
+    public SpdyFrameDecoder(SpdyVersion spdyVersion, SpdyFrameDecoderDelegate delegate) {
+        this(spdyVersion, delegate, 8192);
     }
 
     /**
      * Creates a new instance with the specified parameters.
      */
-    public SpdyFrameDecoder(int version, int maxChunkSize, int maxHeaderSize) {
-        if (version < SpdyConstants.SPDY_MIN_VERSION || version > SpdyConstants.SPDY_MAX_VERSION) {
-            throw new IllegalArgumentException(
-                    "unsupported version: " + version);
+    public SpdyFrameDecoder(SpdyVersion spdyVersion, SpdyFrameDecoderDelegate delegate, int maxChunkSize) {
+        if (spdyVersion == null) {
+            throw new NullPointerException("spdyVersion");
+        }
+        if (delegate == null) {
+            throw new NullPointerException("delegate");
         }
         if (maxChunkSize <= 0) {
             throw new IllegalArgumentException(
                     "maxChunkSize must be a positive integer: " + maxChunkSize);
         }
-        if (maxHeaderSize <= 0) {
-            throw new IllegalArgumentException(
-                    "maxHeaderSize must be a positive integer: " + maxHeaderSize);
-        }
-        spdyVersion = version;
+        this.spdyVersion = spdyVersion.getVersion();
+        this.delegate = delegate;
         this.maxChunkSize = maxChunkSize;
-        this.maxHeaderSize = maxHeaderSize;
-        headerBlockDecompressor = SpdyHeaderBlockDecompressor.newInstance(version);
         state = State.READ_COMMON_HEADER;
     }
 
-    @Override
-    public Object decodeLast(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
-        try {
-            return decode(ctx, in);
-        } finally {
-            headerBlockDecompressor.end();
-        }
-    }
+    public void decode(ByteBuf buffer) {
+        boolean last;
+        int statusCode;
 
-    @Override
-    protected Object decode(ChannelHandlerContext ctx, ByteBuf buffer) throws Exception {
-        switch(state) {
-        case READ_COMMON_HEADER:
-            state = readCommonHeader(buffer);
-            if (state == State.FRAME_ERROR) {
-                if (version != spdyVersion) {
-                    fireProtocolException(ctx, "Unsupported version: " + version);
-                } else {
-                    fireInvalidControlFrameException(ctx);
-                }
-            }
-
-            // FrameDecoders must consume data when producing frames
-            // All length 0 frames must be generated now
-            if (length == 0) {
-                if (state == State.READ_DATA_FRAME) {
-                    if (streamID == 0) {
-                        state = State.FRAME_ERROR;
-                        fireProtocolException(ctx, "Received invalid data frame");
-                        return null;
+        while (true) {
+            switch(state) {
+                case READ_COMMON_HEADER:
+                    if (buffer.readableBytes() < SPDY_HEADER_SIZE) {
+                        return;
                     }
 
-                    SpdyDataFrame spdyDataFrame = new DefaultSpdyDataFrame(streamID);
-                    spdyDataFrame.setLast((flags & SPDY_DATA_FLAG_FIN) != 0);
-                    state = State.READ_COMMON_HEADER;
-                    return spdyDataFrame;
-                }
-                // There are no length 0 control frames
-                state = State.READ_COMMON_HEADER;
-            }
+                    int frameOffset  = buffer.readerIndex();
+                    int flagsOffset  = frameOffset + SPDY_HEADER_FLAGS_OFFSET;
+                    int lengthOffset = frameOffset + SPDY_HEADER_LENGTH_OFFSET;
+                    buffer.skipBytes(SPDY_HEADER_SIZE);
 
-            return null;
+                    boolean control = (buffer.getByte(frameOffset) & 0x80) != 0;
 
-        case READ_CONTROL_FRAME:
-            try {
-                Object frame = readControlFrame(buffer);
-                if (frame != null) {
-                    state = State.READ_COMMON_HEADER;
-                }
-                return frame;
-            } catch (IllegalArgumentException e) {
-                state = State.FRAME_ERROR;
-                fireInvalidControlFrameException(ctx);
-            }
-            return null;
+                    int version;
+                    int type;
+                    if (control) {
+                        // Decode control frame common header
+                        version = getUnsignedShort(buffer, frameOffset) & 0x7FFF;
+                        type = getUnsignedShort(buffer, frameOffset + SPDY_HEADER_TYPE_OFFSET);
+                        streamId = 0; // Default to session Stream-ID
+                    } else {
+                        // Decode data frame common header
+                        version = spdyVersion; // Default to expected version
+                        type = SPDY_DATA_FRAME;
+                        streamId = getUnsignedInt(buffer, frameOffset);
+                    }
 
-        case READ_SETTINGS_FRAME:
-            if (spdySettingsFrame == null) {
-                // Validate frame length against number of entries
-                if (buffer.readableBytes() < 4) {
-                    return null;
-                }
-                int numEntries = getUnsignedInt(buffer, buffer.readerIndex());
-                buffer.skipBytes(4);
-                length -= 4;
+                    flags  = buffer.getByte(flagsOffset);
+                    length = getUnsignedMedium(buffer, lengthOffset);
 
-                // Each ID/Value entry is 8 bytes
-                if ((length & 0x07) != 0 || length >> 3 != numEntries) {
-                    state = State.FRAME_ERROR;
-                    fireInvalidControlFrameException(ctx);
-                    return null;
-                }
+                    // Check version first then validity
+                    if (version != spdyVersion) {
+                        state = State.FRAME_ERROR;
+                        delegate.readFrameError("Invalid SPDY Version");
+                    } else if (!isValidFrameHeader(streamId, type, flags, length)) {
+                        state = State.FRAME_ERROR;
+                        delegate.readFrameError("Invalid Frame Error");
+                    } else {
+                        state = getNextState(type, length);
+                    }
+                    break;
 
-                spdySettingsFrame = new DefaultSpdySettingsFrame();
-
-                boolean clear = (flags & SPDY_SETTINGS_CLEAR) != 0;
-                spdySettingsFrame.setClearPreviouslyPersistedSettings(clear);
-            }
-
-            int readableEntries = Math.min(buffer.readableBytes() >> 3, length >> 3);
-            for (int i = 0; i < readableEntries; i ++) {
-                int ID;
-                byte ID_flags;
-                if (version < 3) {
-                    // Chromium Issue 79156
-                    // SPDY setting ids are not written in network byte order
-                    // Read id assuming the architecture is little endian
-                    ID = buffer.readByte() & 0xFF |
-                        (buffer.readByte() & 0xFF) << 8 |
-                        (buffer.readByte() & 0xFF) << 16;
-                    ID_flags = buffer.readByte();
-                } else {
-                    ID_flags = buffer.readByte();
-                    ID = getUnsignedMedium(buffer, buffer.readerIndex());
-                    buffer.skipBytes(3);
-                }
-                int value = getSignedInt(buffer, buffer.readerIndex());
-                buffer.skipBytes(4);
-
-                // Check for invalid ID -- avoid IllegalArgumentException in setValue
-                if (ID == 0) {
-                    state = State.FRAME_ERROR;
-                    spdySettingsFrame = null;
-                    fireInvalidControlFrameException(ctx);
-                    return null;
-                }
-
-                if (!spdySettingsFrame.isSet(ID)) {
-                    boolean persistVal = (ID_flags & SPDY_SETTINGS_PERSIST_VALUE) != 0;
-                    boolean persisted  = (ID_flags & SPDY_SETTINGS_PERSISTED) != 0;
-                    spdySettingsFrame.setValue(ID, value, persistVal, persisted);
-                }
-            }
-
-            length -= 8 * readableEntries;
-            if (length == 0) {
-                state = State.READ_COMMON_HEADER;
-                Object frame = spdySettingsFrame;
-                spdySettingsFrame = null;
-                return frame;
-            }
-            return null;
-
-        case READ_HEADER_BLOCK_FRAME:
-            try {
-                spdyHeaderBlock = readHeaderBlockFrame(buffer);
-                if (spdyHeaderBlock != null) {
+                case READ_DATA_FRAME:
                     if (length == 0) {
                         state = State.READ_COMMON_HEADER;
-                        Object frame = spdyHeaderBlock;
-                        spdyHeaderBlock = null;
-                        return frame;
+                        delegate.readDataFrame(streamId, hasFlag(flags, SPDY_DATA_FLAG_FIN), Unpooled.buffer(0));
+                        break;
                     }
-                    state = State.READ_HEADER_BLOCK;
-                }
-                return null;
-            } catch (IllegalArgumentException e) {
-                state = State.FRAME_ERROR;
-                fireInvalidControlFrameException(ctx);
-                return null;
-            }
 
-        case READ_HEADER_BLOCK:
-            int compressedBytes = Math.min(buffer.readableBytes(), length);
-            length -= compressedBytes;
+                    // Generate data frames that do not exceed maxChunkSize
+                    int dataLength = Math.min(maxChunkSize, length);
 
-            try {
-                decodeHeaderBlock(buffer.readSlice(compressedBytes));
-            } catch (Exception e) {
-                state = State.FRAME_ERROR;
-                spdyHeaderBlock = null;
-                decompressed = null;
-                ctx.fireExceptionCaught(e);
-                return null;
-            }
+                    // Wait until entire frame is readable
+                    if (buffer.readableBytes() < dataLength) {
+                        return;
+                    }
 
-            if (spdyHeaderBlock != null && spdyHeaderBlock.isInvalid()) {
-                Object frame = spdyHeaderBlock;
-                spdyHeaderBlock = null;
-                decompressed = null;
-                if (length == 0) {
+                    ByteBuf data = buffer.alloc().buffer(dataLength);
+                    data.writeBytes(buffer, dataLength);
+                    length -= dataLength;
+
+                    if (length == 0) {
+                        state = State.READ_COMMON_HEADER;
+                    }
+
+                    last = length == 0 && hasFlag(flags, SPDY_DATA_FLAG_FIN);
+
+                    delegate.readDataFrame(streamId, last, data);
+                    break;
+
+                case READ_SYN_STREAM_FRAME:
+                    if (buffer.readableBytes() < 10) {
+                        return;
+                    }
+
+                    int offset = buffer.readerIndex();
+                    streamId = getUnsignedInt(buffer, offset);
+                    int associatedToStreamId = getUnsignedInt(buffer, offset + 4);
+                    byte priority = (byte) (buffer.getByte(offset + 8) >> 5 & 0x07);
+                    last = hasFlag(flags, SPDY_FLAG_FIN);
+                    boolean unidirectional = hasFlag(flags, SPDY_FLAG_UNIDIRECTIONAL);
+                    buffer.skipBytes(10);
+                    length -= 10;
+
+                    if (streamId == 0) {
+                        state = State.FRAME_ERROR;
+                        delegate.readFrameError("Invalid SYN_STREAM Frame");
+                    } else {
+                        state = State.READ_HEADER_BLOCK;
+                        delegate.readSynStreamFrame(streamId, associatedToStreamId, priority, last, unidirectional);
+                    }
+                    break;
+
+                case READ_SYN_REPLY_FRAME:
+                    if (buffer.readableBytes() < 4) {
+                        return;
+                    }
+
+                    streamId = getUnsignedInt(buffer, buffer.readerIndex());
+                    last = hasFlag(flags, SPDY_FLAG_FIN);
+
+                    buffer.skipBytes(4);
+                    length -= 4;
+
+                    if (streamId == 0) {
+                        state = State.FRAME_ERROR;
+                        delegate.readFrameError("Invalid SYN_REPLY Frame");
+                    } else {
+                        state = State.READ_HEADER_BLOCK;
+                        delegate.readSynReplyFrame(streamId, last);
+                    }
+                    break;
+
+                case READ_RST_STREAM_FRAME:
+                    if (buffer.readableBytes() < 8) {
+                        return;
+                    }
+
+                    streamId = getUnsignedInt(buffer, buffer.readerIndex());
+                    statusCode = getSignedInt(buffer, buffer.readerIndex() + 4);
+                    buffer.skipBytes(8);
+
+                    if (streamId == 0 || statusCode == 0) {
+                        state = State.FRAME_ERROR;
+                        delegate.readFrameError("Invalid RST_STREAM Frame");
+                    } else {
+                        state = State.READ_COMMON_HEADER;
+                        delegate.readRstStreamFrame(streamId, statusCode);
+                    }
+                    break;
+
+                case READ_SETTINGS_FRAME:
+                    if (buffer.readableBytes() < 4) {
+                        return;
+                    }
+
+                    boolean clear = hasFlag(flags, SPDY_SETTINGS_CLEAR);
+
+                    numSettings = getUnsignedInt(buffer, buffer.readerIndex());
+                    buffer.skipBytes(4);
+                    length -= 4;
+
+                    // Validate frame length against number of entries. Each ID/Value entry is 8 bytes.
+                    if ((length & 0x07) != 0 || length >> 3 != numSettings) {
+                        state = State.FRAME_ERROR;
+                        delegate.readFrameError("Invalid SETTINGS Frame");
+                    } else {
+                        state = State.READ_SETTING;
+                        delegate.readSettingsFrame(clear);
+                    }
+                    break;
+
+                case READ_SETTING:
+                    if (numSettings == 0) {
+                        state = State.READ_COMMON_HEADER;
+                        delegate.readSettingsEnd();
+                        break;
+                    }
+
+                    if (buffer.readableBytes() < 8) {
+                        return;
+                    }
+
+                    byte settingsFlags = buffer.getByte(buffer.readerIndex());
+                    int id = getUnsignedMedium(buffer, buffer.readerIndex() + 1);
+                    int value = getSignedInt(buffer, buffer.readerIndex() + 4);
+                    boolean persistValue = hasFlag(settingsFlags, SPDY_SETTINGS_PERSIST_VALUE);
+                    boolean persisted = hasFlag(settingsFlags, SPDY_SETTINGS_PERSISTED);
+                    buffer.skipBytes(8);
+
+                    --numSettings;
+
+                    delegate.readSetting(id, value, persistValue, persisted);
+                    break;
+
+                case READ_PING_FRAME:
+                    if (buffer.readableBytes() < 4) {
+                        return;
+                    }
+
+                    int pingId = getSignedInt(buffer, buffer.readerIndex());
+                    buffer.skipBytes(4);
+
                     state = State.READ_COMMON_HEADER;
-                }
-                return frame;
-            }
-
-            if (length == 0) {
-                Object frame = spdyHeaderBlock;
-                spdyHeaderBlock = null;
-                state = State.READ_COMMON_HEADER;
-                return frame;
-            }
-            return null;
-
-        case READ_DATA_FRAME:
-            if (streamID == 0) {
-                state = State.FRAME_ERROR;
-                fireProtocolException(ctx, "Received invalid data frame");
-                return null;
-            }
-
-            // Generate data frames that do not exceed maxChunkSize
-            int dataLength = Math.min(maxChunkSize, length);
-
-            // Wait until entire frame is readable
-            if (buffer.readableBytes() < dataLength) {
-                return null;
-            }
-
-            ByteBuf data = ctx.alloc().buffer(dataLength);
-            data.writeBytes(buffer, dataLength);
-            SpdyDataFrame spdyDataFrame = new DefaultSpdyDataFrame(streamID, data);
-            length -= dataLength;
-
-            if (length == 0) {
-                spdyDataFrame.setLast((flags & SPDY_DATA_FLAG_FIN) != 0);
-                state = State.READ_COMMON_HEADER;
-            }
-            return spdyDataFrame;
-
-        case DISCARD_FRAME:
-            int numBytes = Math.min(buffer.readableBytes(), length);
-            buffer.skipBytes(numBytes);
-            length -= numBytes;
-            if (length == 0) {
-                state = State.READ_COMMON_HEADER;
-            }
-            return null;
-
-        case FRAME_ERROR:
-            buffer.skipBytes(buffer.readableBytes());
-            return null;
-
-        default:
-            throw new Error("Shouldn't reach here.");
-        }
-    }
-
-    private State readCommonHeader(ByteBuf buffer) {
-        // Wait until entire header is readable
-        if (buffer.readableBytes() < SPDY_HEADER_SIZE) {
-            return State.READ_COMMON_HEADER;
-        }
-
-        int frameOffset  = buffer.readerIndex();
-        int flagsOffset  = frameOffset + SPDY_HEADER_FLAGS_OFFSET;
-        int lengthOffset = frameOffset + SPDY_HEADER_LENGTH_OFFSET;
-        buffer.skipBytes(SPDY_HEADER_SIZE);
-
-        // Read common header fields
-        boolean control = (buffer.getByte(frameOffset) & 0x80) != 0;
-        flags  = buffer.getByte(flagsOffset);
-        length = getUnsignedMedium(buffer, lengthOffset);
-
-        if (control) {
-            // Decode control frame common header
-            version = getUnsignedShort(buffer, frameOffset) & 0x7FFF;
-
-            int typeOffset = frameOffset + SPDY_HEADER_TYPE_OFFSET;
-            type = getUnsignedShort(buffer, typeOffset);
-
-            // Check version first then validity
-            if (version != spdyVersion || !isValidControlFrameHeader()) {
-                return State.FRAME_ERROR;
-            }
-
-            // Make sure decoder will produce a frame or consume input
-            State nextState;
-            if (willGenerateControlFrame()) {
-                switch (type) {
-                case SPDY_SYN_STREAM_FRAME:
-                case SPDY_SYN_REPLY_FRAME:
-                case SPDY_HEADERS_FRAME:
-                    nextState = State.READ_HEADER_BLOCK_FRAME;
+                    delegate.readPingFrame(pingId);
                     break;
 
-                case SPDY_SETTINGS_FRAME:
-                    nextState = State.READ_SETTINGS_FRAME;
+                case READ_GOAWAY_FRAME:
+                    if (buffer.readableBytes() < 8) {
+                        return;
+                    }
+
+                    int lastGoodStreamId = getUnsignedInt(buffer, buffer.readerIndex());
+                    statusCode = getSignedInt(buffer, buffer.readerIndex() + 4);
+                    buffer.skipBytes(8);
+
+                    state = State.READ_COMMON_HEADER;
+                    delegate.readGoAwayFrame(lastGoodStreamId, statusCode);
                     break;
+
+                case READ_HEADERS_FRAME:
+                    if (buffer.readableBytes() < 4) {
+                        return;
+                    }
+
+                    streamId = getUnsignedInt(buffer, buffer.readerIndex());
+                    last = hasFlag(flags, SPDY_FLAG_FIN);
+
+                    buffer.skipBytes(4);
+                    length -= 4;
+
+                    if (streamId == 0) {
+                        state = State.FRAME_ERROR;
+                        delegate.readFrameError("Invalid HEADERS Frame");
+                    } else {
+                        state = State.READ_HEADER_BLOCK;
+                        delegate.readHeadersFrame(streamId, last);
+                    }
+                    break;
+
+                case READ_WINDOW_UPDATE_FRAME:
+                    if (buffer.readableBytes() < 8) {
+                        return;
+                    }
+
+                    streamId = getUnsignedInt(buffer, buffer.readerIndex());
+                    int deltaWindowSize = getUnsignedInt(buffer, buffer.readerIndex() + 4);
+                    buffer.skipBytes(8);
+
+                    if (deltaWindowSize == 0) {
+                        state = State.FRAME_ERROR;
+                        delegate.readFrameError("Invalid WINDOW_UPDATE Frame");
+                    } else {
+                        state = State.READ_COMMON_HEADER;
+                        delegate.readWindowUpdateFrame(streamId, deltaWindowSize);
+                    }
+                    break;
+
+                case READ_HEADER_BLOCK:
+                    if (length == 0) {
+                        state = State.READ_COMMON_HEADER;
+                        delegate.readHeaderBlockEnd();
+                        break;
+                    }
+
+                    if (!buffer.isReadable()) {
+                        return;
+                    }
+
+                    int compressedBytes = Math.min(buffer.readableBytes(), length);
+                    ByteBuf headerBlock = buffer.alloc().buffer(compressedBytes);
+                    headerBlock.writeBytes(buffer, compressedBytes);
+                    length -= compressedBytes;
+
+                    delegate.readHeaderBlock(headerBlock);
+                    break;
+
+                case DISCARD_FRAME:
+                    int numBytes = Math.min(buffer.readableBytes(), length);
+                    buffer.skipBytes(numBytes);
+                    length -= numBytes;
+                    if (length == 0) {
+                        state = State.READ_COMMON_HEADER;
+                        break;
+                    }
+                    return;
+
+                case FRAME_ERROR:
+                    buffer.skipBytes(buffer.readableBytes());
+                    return;
 
                 default:
-                    nextState = State.READ_CONTROL_FRAME;
-                }
-            } else if (length != 0) {
-                nextState = State.DISCARD_FRAME;
-            } else {
-                nextState = State.READ_COMMON_HEADER;
+                    throw new Error("Shouldn't reach here.");
             }
-            return nextState;
-        } else {
-            // Decode data frame common header
-            streamID = getUnsignedInt(buffer, frameOffset);
-
-            return State.READ_DATA_FRAME;
         }
     }
 
-    private Object readControlFrame(ByteBuf buffer) {
-        int streamID;
-        int statusCode;
+    private static boolean hasFlag(byte flags, byte flag) {
+        return (flags & flag) != 0;
+    }
+
+    private static State getNextState(int type, int length) {
         switch (type) {
-        case SPDY_RST_STREAM_FRAME:
-            if (buffer.readableBytes() < 8) {
-                return null;
-            }
+            case SPDY_DATA_FRAME:
+                return State.READ_DATA_FRAME;
 
-            streamID = getUnsignedInt(buffer, buffer.readerIndex());
-            statusCode = getSignedInt(buffer, buffer.readerIndex() + 4);
-            buffer.skipBytes(8);
+            case SPDY_SYN_STREAM_FRAME:
+                return State.READ_SYN_STREAM_FRAME;
 
-            return new DefaultSpdyRstStreamFrame(streamID, statusCode);
+            case SPDY_SYN_REPLY_FRAME:
+                return State.READ_SYN_REPLY_FRAME;
 
-        case SPDY_PING_FRAME:
-            if (buffer.readableBytes() < 4) {
-                return null;
-            }
+            case SPDY_RST_STREAM_FRAME:
+                return State.READ_RST_STREAM_FRAME;
 
-            int ID = getSignedInt(buffer, buffer.readerIndex());
-            buffer.skipBytes(4);
+            case SPDY_SETTINGS_FRAME:
+                return State.READ_SETTINGS_FRAME;
 
-            return new DefaultSpdyPingFrame(ID);
+            case SPDY_PING_FRAME:
+                return State.READ_PING_FRAME;
 
-        case SPDY_GOAWAY_FRAME:
-            int minLength = version < 3 ? 4 : 8;
-            if (buffer.readableBytes() < minLength) {
-                return null;
-            }
+            case SPDY_GOAWAY_FRAME:
+                return State.READ_GOAWAY_FRAME;
 
-            int lastGoodStreamId = getUnsignedInt(buffer, buffer.readerIndex());
-            buffer.skipBytes(4);
+            case SPDY_HEADERS_FRAME:
+                return State.READ_HEADERS_FRAME;
 
-            if (version < 3) {
-                return new DefaultSpdyGoAwayFrame(lastGoodStreamId);
-            }
+            case SPDY_WINDOW_UPDATE_FRAME:
+                return State.READ_WINDOW_UPDATE_FRAME;
 
-            statusCode = getSignedInt(buffer, buffer.readerIndex());
-            buffer.skipBytes(4);
-
-            return new DefaultSpdyGoAwayFrame(lastGoodStreamId, statusCode);
-
-        case SPDY_WINDOW_UPDATE_FRAME:
-            if (buffer.readableBytes() < 8) {
-                return null;
-            }
-
-            streamID = getUnsignedInt(buffer, buffer.readerIndex());
-            int deltaWindowSize = getUnsignedInt(buffer, buffer.readerIndex() + 4);
-            buffer.skipBytes(8);
-
-            return new DefaultSpdyWindowUpdateFrame(streamID, deltaWindowSize);
-
-        default:
-            throw new Error("Shouldn't reach here.");
-        }
-    }
-
-    private SpdyHeaderBlock readHeaderBlockFrame(ByteBuf buffer) {
-        int minLength;
-        int streamID;
-        switch (type) {
-        case SPDY_SYN_STREAM_FRAME:
-            minLength = version < 3 ? 12 : 10;
-            if (buffer.readableBytes() < minLength) {
-                return null;
-            }
-
-            int offset = buffer.readerIndex();
-            streamID = getUnsignedInt(buffer, offset);
-            int associatedToStreamId = getUnsignedInt(buffer, offset + 4);
-            byte priority = (byte) (buffer.getByte(offset + 8) >> 5 & 0x07);
-            if (version < 3) {
-                priority >>= 1;
-            }
-            buffer.skipBytes(10);
-            length -= 10;
-
-            // SPDY/2 requires 16-bits of padding for empty header blocks
-            if (version < 3 && length == 2 && buffer.getShort(buffer.readerIndex()) == 0) {
-                buffer.skipBytes(2);
-                length = 0;
-            }
-
-            SpdySynStreamFrame spdySynStreamFrame =
-                    new DefaultSpdySynStreamFrame(streamID, associatedToStreamId, priority);
-            spdySynStreamFrame.setLast((flags & SPDY_FLAG_FIN) != 0);
-            spdySynStreamFrame.setUnidirectional((flags & SPDY_FLAG_UNIDIRECTIONAL) != 0);
-
-            return spdySynStreamFrame;
-
-        case SPDY_SYN_REPLY_FRAME:
-            minLength = version < 3 ? 8 : 4;
-            if (buffer.readableBytes() < minLength) {
-                return null;
-            }
-
-            streamID = getUnsignedInt(buffer, buffer.readerIndex());
-            buffer.skipBytes(4);
-            length -= 4;
-
-            // SPDY/2 has 16-bits of unused space
-            if (version < 3) {
-                buffer.skipBytes(2);
-                length -= 2;
-            }
-
-            // SPDY/2 requires 16-bits of padding for empty header blocks
-            if (version < 3 && length == 2 && buffer.getShort(buffer.readerIndex()) == 0) {
-                buffer.skipBytes(2);
-                length = 0;
-            }
-
-            SpdySynReplyFrame spdySynReplyFrame = new DefaultSpdySynReplyFrame(streamID);
-            spdySynReplyFrame.setLast((flags & SPDY_FLAG_FIN) != 0);
-
-            return spdySynReplyFrame;
-
-        case SPDY_HEADERS_FRAME:
-            if (buffer.readableBytes() < 4) {
-                return null;
-            }
-
-            // SPDY/2 allows length 4 frame when there are no name/value pairs
-            if (version < 3 && length > 4 && buffer.readableBytes() < 8) {
-                return null;
-            }
-
-            streamID = getUnsignedInt(buffer, buffer.readerIndex());
-            buffer.skipBytes(4);
-            length -= 4;
-
-            // SPDY/2 has 16-bits of unused space
-            if (version < 3 && length != 0) {
-                buffer.skipBytes(2);
-                length -= 2;
-            }
-
-            // SPDY/2 requires 16-bits of padding for empty header blocks
-            if (version < 3 && length == 2 && buffer.getShort(buffer.readerIndex()) == 0) {
-                buffer.skipBytes(2);
-                length = 0;
-            }
-
-            SpdyHeadersFrame spdyHeadersFrame = new DefaultSpdyHeadersFrame(streamID);
-            spdyHeadersFrame.setLast((flags & SPDY_FLAG_FIN) != 0);
-
-            return spdyHeadersFrame;
-
-        default:
-            throw new Error("Shouldn't reach here.");
-        }
-    }
-
-    private boolean ensureBytes(int bytes) throws Exception {
-        if (decompressed.readableBytes() >= bytes) {
-            return true;
-        }
-        // Perhaps last call to decode filled output buffer
-        int numBytes;
-        boolean done;
-        do {
-            numBytes = headerBlockDecompressor.decode(decompressed);
-            done = decompressed.readableBytes() >= bytes;
-        } while (!done && numBytes > 0);
-        return done;
-    }
-
-    private int readLengthField() {
-        if (version < 3) {
-            return decompressed.readUnsignedShort();
-        } else {
-            return decompressed.readInt();
-        }
-    }
-
-    private void decodeHeaderBlock(ByteBuf buffer) throws Exception {
-        if (decompressed == null) {
-            // First time we start to decode a header block
-            // Initialize header block decoding fields
-            headerSize = 0;
-            numHeaders = -1;
-            decompressed = Unpooled.buffer(8192);
-        }
-
-        // Accumulate decompressed data
-        headerBlockDecompressor.setInput(buffer);
-        headerBlockDecompressor.decode(decompressed);
-
-        if (spdyHeaderBlock == null) {
-            // Only decompressing data to keep decompression context in sync
-            decompressed = null;
-            return;
-        }
-
-        int lengthFieldSize = version < 3 ? 2 : 4;
-
-        if (numHeaders == -1) {
-            // Read number of Name/Value pairs
-            if (decompressed.readableBytes() < lengthFieldSize) {
-                return;
-            }
-            numHeaders = readLengthField();
-            if (numHeaders < 0) {
-                spdyHeaderBlock.setInvalid();
-                return;
-            }
-        }
-
-        while (numHeaders > 0) {
-            int headerSize = this.headerSize;
-            decompressed.markReaderIndex();
-
-            // Try to read length of name
-            if (!ensureBytes(lengthFieldSize)) {
-                decompressed.resetReaderIndex();
-                decompressed.discardReadBytes();
-                return;
-            }
-            int nameLength = readLengthField();
-
-            // Recipients of a zero-length name must issue a stream error
-            if (nameLength <= 0) {
-                spdyHeaderBlock.setInvalid();
-                return;
-            }
-            headerSize += nameLength;
-            if (headerSize > maxHeaderSize) {
-                throw new TooLongFrameException(
-                        "Header block exceeds " + maxHeaderSize);
-            }
-
-            // Try to read name
-            if (!ensureBytes(nameLength)) {
-                decompressed.resetReaderIndex();
-                decompressed.discardReadBytes();
-                return;
-            }
-            byte[] nameBytes = new byte[nameLength];
-            decompressed.readBytes(nameBytes);
-            String name = new String(nameBytes, "UTF-8");
-
-            // Check for identically named headers
-            if (spdyHeaderBlock.headers().contains(name)) {
-                spdyHeaderBlock.setInvalid();
-                return;
-            }
-
-            // Try to read length of value
-            if (!ensureBytes(lengthFieldSize)) {
-                decompressed.resetReaderIndex();
-                decompressed.discardReadBytes();
-                return;
-            }
-            int valueLength = readLengthField();
-
-            // Recipients of illegal value fields must issue a stream error
-            if (valueLength < 0) {
-                spdyHeaderBlock.setInvalid();
-                return;
-            }
-
-            // SPDY/3 allows zero-length (empty) header values
-            if (valueLength == 0) {
-                if (version < 3) {
-                    spdyHeaderBlock.setInvalid();
-                    return;
+            default:
+                if (length != 0) {
+                    return State.DISCARD_FRAME;
                 } else {
-                    spdyHeaderBlock.headers().add(name, "");
-                    numHeaders --;
-                    this.headerSize = headerSize;
-                    continue;
+                    return State.READ_COMMON_HEADER;
                 }
-            }
-
-            headerSize += valueLength;
-            if (headerSize > maxHeaderSize) {
-                throw new TooLongFrameException(
-                        "Header block exceeds " + maxHeaderSize);
-            }
-
-            // Try to read value
-            if (!ensureBytes(valueLength)) {
-                decompressed.resetReaderIndex();
-                decompressed.discardReadBytes();
-                return;
-            }
-            byte[] valueBytes = new byte[valueLength];
-            decompressed.readBytes(valueBytes);
-
-            // Add Name/Value pair to headers
-            int index = 0;
-            int offset = 0;
-            while (index < valueLength) {
-                while (index < valueBytes.length && valueBytes[index] != (byte) 0) {
-                    index ++;
-                }
-                if (index < valueBytes.length && valueBytes[index + 1] == (byte) 0) {
-                    // Received multiple, in-sequence NULL characters
-                    // Recipients of illegal value fields must issue a stream error
-                    spdyHeaderBlock.setInvalid();
-                    return;
-                }
-                String value = new String(valueBytes, offset, index - offset, "UTF-8");
-
-                try {
-                    spdyHeaderBlock.headers().add(name, value);
-                } catch (IllegalArgumentException e) {
-                    // Name contains NULL or non-ascii characters
-                    spdyHeaderBlock.setInvalid();
-                    return;
-                }
-                index ++;
-                offset = index;
-            }
-            numHeaders --;
-            this.headerSize = headerSize;
         }
-        decompressed = null;
     }
 
-    private boolean isValidControlFrameHeader() {
+    private static boolean isValidFrameHeader(int streamId, int type, byte flags, int length) {
         switch (type) {
-        case SPDY_SYN_STREAM_FRAME:
-            return version < 3 ? length >= 12 : length >= 10;
+            case SPDY_DATA_FRAME:
+                return streamId != 0;
 
-        case SPDY_SYN_REPLY_FRAME:
-            return version < 3 ? length >= 8 : length >= 4;
+            case SPDY_SYN_STREAM_FRAME:
+                return length >= 10;
 
-        case SPDY_RST_STREAM_FRAME:
-            return flags == 0 && length == 8;
-
-        case SPDY_SETTINGS_FRAME:
-            return length >= 4;
-
-        case SPDY_NOOP_FRAME:
-            return length == 0;
-
-        case SPDY_PING_FRAME:
-            return length == 4;
-
-        case SPDY_GOAWAY_FRAME:
-            return version < 3 ? length == 4 : length == 8;
-
-        case SPDY_HEADERS_FRAME:
-            if (version < 3) {
-                return length == 4 || length >= 8;
-            } else {
+            case SPDY_SYN_REPLY_FRAME:
                 return length >= 4;
-            }
 
-        case SPDY_WINDOW_UPDATE_FRAME:
-            return length == 8;
+            case SPDY_RST_STREAM_FRAME:
+                return flags == 0 && length == 8;
 
-        case SPDY_CREDENTIAL_FRAME:
-        default:
-            return true;
+            case SPDY_SETTINGS_FRAME:
+                return length >= 4;
+
+            case SPDY_PING_FRAME:
+                return length == 4;
+
+            case SPDY_GOAWAY_FRAME:
+                return length == 8;
+
+            case SPDY_HEADERS_FRAME:
+                return length >= 4;
+
+            case SPDY_WINDOW_UPDATE_FRAME:
+                return length == 8;
+
+            default:
+                return true;
         }
-    }
-
-    private boolean willGenerateControlFrame() {
-        switch (type) {
-        case SPDY_SYN_STREAM_FRAME:
-        case SPDY_SYN_REPLY_FRAME:
-        case SPDY_RST_STREAM_FRAME:
-        case SPDY_SETTINGS_FRAME:
-        case SPDY_PING_FRAME:
-        case SPDY_GOAWAY_FRAME:
-        case SPDY_HEADERS_FRAME:
-        case SPDY_WINDOW_UPDATE_FRAME:
-            return true;
-
-        case SPDY_NOOP_FRAME:
-        case SPDY_CREDENTIAL_FRAME:
-        default:
-            return false;
-        }
-    }
-
-    private void fireInvalidControlFrameException(ChannelHandlerContext ctx) {
-        String message = "Received invalid control frame";
-        switch (type) {
-        case SPDY_SYN_STREAM_FRAME:
-            message = "Received invalid SYN_STREAM control frame";
-            break;
-
-        case SPDY_SYN_REPLY_FRAME:
-            message = "Received invalid SYN_REPLY control frame";
-            break;
-
-        case SPDY_RST_STREAM_FRAME:
-            message = "Received invalid RST_STREAM control frame";
-            break;
-
-        case SPDY_SETTINGS_FRAME:
-            message = "Received invalid SETTINGS control frame";
-            break;
-
-        case SPDY_NOOP_FRAME:
-            message = "Received invalid NOOP control frame";
-            break;
-
-        case SPDY_PING_FRAME:
-            message = "Received invalid PING control frame";
-            break;
-
-        case SPDY_GOAWAY_FRAME:
-            message = "Received invalid GOAWAY control frame";
-            break;
-
-        case SPDY_HEADERS_FRAME:
-            message = "Received invalid HEADERS control frame";
-            break;
-
-        case SPDY_WINDOW_UPDATE_FRAME:
-            message = "Received invalid WINDOW_UPDATE control frame";
-            break;
-
-        case SPDY_CREDENTIAL_FRAME:
-            message = "Received invalid CREDENTIAL control frame";
-            break;
-        }
-        fireProtocolException(ctx, message);
-    }
-
-    private static void fireProtocolException(ChannelHandlerContext ctx, String message) {
-        ctx.fireExceptionCaught(new SpdyProtocolException(message));
     }
 }

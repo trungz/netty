@@ -25,6 +25,7 @@ import io.netty.handler.codec.LineBasedFrameDecoder;
 import io.netty.handler.codec.MessageToMessageDecoder;
 
 import java.nio.charset.Charset;
+import java.util.List;
 
 /**
  * Decodes a received {@link ByteBuf} into a {@link String}.  Please
@@ -45,11 +46,10 @@ import java.nio.charset.Charset;
  * and then you can use a {@link String} instead of a {@link ByteBuf}
  * as a message:
  * <pre>
- * void messageReceived({@link ChannelHandlerContext} ctx, {@link String} msg) {
+ * void channelRead({@link ChannelHandlerContext} ctx, {@link String} msg) {
  *     ch.write("Did you say '" + msg + "'?\n");
  * }
  * </pre>
- * @apiviz.landmark
  */
 @Sharable
 public class StringDecoder extends MessageToMessageDecoder<ByteBuf> {
@@ -68,8 +68,6 @@ public class StringDecoder extends MessageToMessageDecoder<ByteBuf> {
      * Creates a new instance with the specified character set.
      */
     public StringDecoder(Charset charset) {
-        super(ByteBuf.class);
-
         if (charset == null) {
             throw new NullPointerException("charset");
         }
@@ -77,7 +75,7 @@ public class StringDecoder extends MessageToMessageDecoder<ByteBuf> {
     }
 
     @Override
-    protected Object decode(ChannelHandlerContext ctx, ByteBuf msg) throws Exception {
-        return msg.toString(charset);
+    protected void decode(ChannelHandlerContext ctx, ByteBuf msg, List<Object> out) throws Exception {
+        out.add(msg.toString(charset));
     }
 }

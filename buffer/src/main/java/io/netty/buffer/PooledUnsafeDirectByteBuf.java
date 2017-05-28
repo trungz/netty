@@ -16,30 +16,42 @@
 
 package io.netty.buffer;
 
+import io.netty.util.Recycler;
 import io.netty.util.internal.PlatformDependent;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.channels.ClosedChannelException;
+import java.nio.channels.FileChannel;
 import java.nio.channels.GatheringByteChannel;
 import java.nio.channels.ScatteringByteChannel;
 
 final class PooledUnsafeDirectByteBuf extends PooledByteBuf<ByteBuffer> {
+    private static final Recycler<PooledUnsafeDirectByteBuf> RECYCLER = new Recycler<PooledUnsafeDirectByteBuf>() {
+        @Override
+        protected PooledUnsafeDirectByteBuf newObject(Handle<PooledUnsafeDirectByteBuf> handle) {
+            return new PooledUnsafeDirectByteBuf(handle, 0);
+        }
+    };
 
-    private static final boolean NATIVE_ORDER = ByteOrder.nativeOrder() == ByteOrder.BIG_ENDIAN;
+    static PooledUnsafeDirectByteBuf newInstance(int maxCapacity) {
+        PooledUnsafeDirectByteBuf buf = RECYCLER.get();
+        buf.reuse(maxCapacity);
+        return buf;
+    }
 
     private long memoryAddress;
 
-    PooledUnsafeDirectByteBuf(int maxCapacity) {
-        super(maxCapacity);
+    private PooledUnsafeDirectByteBuf(Recycler.Handle<PooledUnsafeDirectByteBuf> recyclerHandle, int maxCapacity) {
+        super(recyclerHandle, maxCapacity);
     }
 
     @Override
-    void init(PoolChunk<ByteBuffer> chunk, long handle, int offset, int length, int maxLength) {
-        super.init(chunk, handle, offset, length, maxLength);
+    void init(PoolChunk<ByteBuffer> chunk, long handle, int offset, int length, int maxLength,
+              PoolThreadCache cache) {
+        super.init(chunk, handle, offset, length, maxLength, cache);
         initMemoryAddress();
     }
 
@@ -64,214 +76,237 @@ final class PooledUnsafeDirectByteBuf extends PooledByteBuf<ByteBuffer> {
     }
 
     @Override
-    public byte getByte(int index) {
-        checkIndex(index);
-        return PlatformDependent.getByte(addr(index));
+    protected byte _getByte(int index) {
+        return UnsafeByteBufUtil.getByte(addr(index));
     }
 
     @Override
-    public short getShort(int index) {
-        checkIndex(index, 2);
-        short v = PlatformDependent.getShort(addr(index));
-        return NATIVE_ORDER? v : Short.reverseBytes(v);
+    protected short _getShort(int index) {
+        return UnsafeByteBufUtil.getShort(addr(index));
     }
 
     @Override
-    public int getUnsignedMedium(int index) {
-        checkIndex(index, 3);
-        long addr = addr(index);
-        return (PlatformDependent.getByte(addr) & 0xff) << 16 |
-                (PlatformDependent.getByte(addr + 1) & 0xff) << 8 |
-                PlatformDependent.getByte(addr + 2) & 0xff;
+    protected short _getShortLE(int index) {
+        return UnsafeByteBufUtil.getShortLE(addr(index));
     }
 
     @Override
-    public int getInt(int index) {
-        checkIndex(index, 4);
-        int v = PlatformDependent.getInt(addr(index));
-        return NATIVE_ORDER? v : Integer.reverseBytes(v);
+    protected int _getUnsignedMedium(int index) {
+        return UnsafeByteBufUtil.getUnsignedMedium(addr(index));
     }
 
     @Override
-    public long getLong(int index) {
-        checkIndex(index, 8);
-        long v = PlatformDependent.getLong(addr(index));
-        return NATIVE_ORDER? v : Long.reverseBytes(v);
+    protected int _getUnsignedMediumLE(int index) {
+        return UnsafeByteBufUtil.getUnsignedMediumLE(addr(index));
+    }
+
+    @Override
+    protected int _getInt(int index) {
+        return UnsafeByteBufUtil.getInt(addr(index));
+    }
+
+    @Override
+    protected int _getIntLE(int index) {
+        return UnsafeByteBufUtil.getIntLE(addr(index));
+    }
+
+    @Override
+    protected long _getLong(int index) {
+        return UnsafeByteBufUtil.getLong(addr(index));
+    }
+
+    @Override
+    protected long _getLongLE(int index) {
+        return UnsafeByteBufUtil.getLongLE(addr(index));
     }
 
     @Override
     public ByteBuf getBytes(int index, ByteBuf dst, int dstIndex, int length) {
-        checkIndex(index, length);
-        if (dst instanceof PooledUnsafeDirectByteBuf) {
-            PooledUnsafeDirectByteBuf bbdst = (PooledUnsafeDirectByteBuf) dst;
-            PlatformDependent.copyMemory(addr(index), bbdst.addr(dstIndex), length);
-        } else if (dst.hasArray()) {
-            getBytes(index, dst.array(), dst.arrayOffset() + dstIndex, length);
-        } else {
-            dst.setBytes(dstIndex, this, index, length);
-        }
+        UnsafeByteBufUtil.getBytes(this, addr(index), index, dst, dstIndex, length);
         return this;
     }
 
     @Override
     public ByteBuf getBytes(int index, byte[] dst, int dstIndex, int length) {
-        checkIndex(index, length);
-        ByteBuffer tmpBuf = internalNioBuffer();
-        index = idx(index);
-        tmpBuf.clear().position(index).limit(index + length);
-        tmpBuf.get(dst, dstIndex, length);
+        UnsafeByteBufUtil.getBytes(this, addr(index), index, dst, dstIndex, length);
         return this;
     }
 
     @Override
     public ByteBuf getBytes(int index, ByteBuffer dst) {
-        checkIndex(index);
-        int bytesToCopy = Math.min(capacity() - index, dst.remaining());
-        ByteBuffer tmpBuf = internalNioBuffer();
-        index = idx(index);
-        tmpBuf.clear().position(index).limit(index + bytesToCopy);
-        dst.put(tmpBuf);
+        UnsafeByteBufUtil.getBytes(this, addr(index), index, dst);
+        return this;
+    }
+
+    @Override
+    public ByteBuf readBytes(ByteBuffer dst) {
+        int length = dst.remaining();
+        checkReadableBytes(length);
+        getBytes(readerIndex, dst);
+        readerIndex += length;
         return this;
     }
 
     @Override
     public ByteBuf getBytes(int index, OutputStream out, int length) throws IOException {
-        checkIndex(index, length);
-        if (length == 0) {
-            return this;
-        }
-
-        byte[] tmp = new byte[length];
-        ByteBuffer tmpBuf = internalNioBuffer();
-        tmpBuf.clear().position(idx(index));
-        tmpBuf.get(tmp);
-        out.write(tmp);
+        UnsafeByteBufUtil.getBytes(this, addr(index), index, out, length);
         return this;
     }
 
     @Override
     public int getBytes(int index, GatheringByteChannel out, int length) throws IOException {
+        return getBytes(index, out, length, false);
+    }
+
+    private int getBytes(int index, GatheringByteChannel out, int length, boolean internal) throws IOException {
         checkIndex(index, length);
         if (length == 0) {
             return 0;
         }
 
-        ByteBuffer tmpBuf = internalNioBuffer();
+        ByteBuffer tmpBuf;
+        if (internal) {
+            tmpBuf = internalNioBuffer();
+        } else {
+            tmpBuf = memory.duplicate();
+        }
         index = idx(index);
         tmpBuf.clear().position(index).limit(index + length);
         return out.write(tmpBuf);
     }
 
     @Override
-    public ByteBuf setByte(int index, int value) {
-        checkIndex(index);
-        PlatformDependent.putByte(addr(index), (byte) value);
-        return this;
+    public int getBytes(int index, FileChannel out, long position, int length) throws IOException {
+        return getBytes(index, out, position, length, false);
+    }
+
+    private int getBytes(int index, FileChannel out, long position, int length, boolean internal) throws IOException {
+        checkIndex(index, length);
+        if (length == 0) {
+            return 0;
+        }
+
+        ByteBuffer tmpBuf = internal ? internalNioBuffer() : memory.duplicate();
+        index = idx(index);
+        tmpBuf.clear().position(index).limit(index + length);
+        return out.write(tmpBuf, position);
     }
 
     @Override
-    public ByteBuf setShort(int index, int value) {
-        checkIndex(index, 2);
-        PlatformDependent.putShort(addr(index), NATIVE_ORDER? (short) value : Short.reverseBytes((short) value));
-        return this;
+    public int readBytes(GatheringByteChannel out, int length)
+            throws IOException {
+        checkReadableBytes(length);
+        int readBytes = getBytes(readerIndex, out, length, true);
+        readerIndex += readBytes;
+        return readBytes;
     }
 
     @Override
-    public ByteBuf setMedium(int index, int value) {
-        checkIndex(index, 3);
-        long addr = addr(index);
-        PlatformDependent.putByte(addr, (byte) (value >>> 16));
-        PlatformDependent.putByte(addr + 1, (byte) (value >>> 8));
-        PlatformDependent.putByte(addr + 2, (byte) value);
-        return this;
+    public int readBytes(FileChannel out, long position, int length)
+            throws IOException {
+        checkReadableBytes(length);
+        int readBytes = getBytes(readerIndex, out, position, length, true);
+        readerIndex += readBytes;
+        return readBytes;
     }
 
     @Override
-    public ByteBuf setInt(int index, int value) {
-        checkIndex(index, 4);
-        PlatformDependent.putInt(addr(index), NATIVE_ORDER? value : Integer.reverseBytes(value));
-        return this;
+    protected void _setByte(int index, int value) {
+        UnsafeByteBufUtil.setByte(addr(index), (byte) value);
     }
 
     @Override
-    public ByteBuf setLong(int index, long value) {
-        checkIndex(index, 8);
-        PlatformDependent.putLong(addr(index), NATIVE_ORDER? value : Long.reverseBytes(value));
-        return this;
+    protected void _setShort(int index, int value) {
+        UnsafeByteBufUtil.setShort(addr(index), value);
+    }
+
+    @Override
+    protected void _setShortLE(int index, int value) {
+        UnsafeByteBufUtil.setShortLE(addr(index), value);
+    }
+
+    @Override
+    protected void _setMedium(int index, int value) {
+        UnsafeByteBufUtil.setMedium(addr(index), value);
+    }
+
+    @Override
+    protected void _setMediumLE(int index, int value) {
+        UnsafeByteBufUtil.setMediumLE(addr(index), value);
+    }
+
+    @Override
+    protected void _setInt(int index, int value) {
+        UnsafeByteBufUtil.setInt(addr(index), value);
+    }
+
+    @Override
+    protected void _setIntLE(int index, int value) {
+        UnsafeByteBufUtil.setIntLE(addr(index), value);
+    }
+
+    @Override
+    protected void _setLong(int index, long value) {
+        UnsafeByteBufUtil.setLong(addr(index), value);
+    }
+
+    @Override
+    protected void _setLongLE(int index, long value) {
+        UnsafeByteBufUtil.setLongLE(addr(index), value);
     }
 
     @Override
     public ByteBuf setBytes(int index, ByteBuf src, int srcIndex, int length) {
-        checkIndex(index, length);
-        if (src instanceof PooledUnsafeDirectByteBuf) {
-            PooledUnsafeDirectByteBuf bbsrc = (PooledUnsafeDirectByteBuf) src;
-            PlatformDependent.copyMemory(bbsrc.addr(srcIndex), addr(index), length);
-        } else if (src.hasArray()) {
-            setBytes(index, src.array(), src.arrayOffset() + srcIndex, length);
-        } else {
-            src.getBytes(srcIndex, this, index, length);
-        }
+        UnsafeByteBufUtil.setBytes(this, addr(index), index, src, srcIndex, length);
         return this;
     }
 
     @Override
     public ByteBuf setBytes(int index, byte[] src, int srcIndex, int length) {
-        checkIndex(index, length);
-        ByteBuffer tmpBuf = internalNioBuffer();
-        index = idx(index);
-        tmpBuf.clear().position(index).limit(index + length);
-        tmpBuf.put(src, srcIndex, length);
+        UnsafeByteBufUtil.setBytes(this, addr(index), index, src, srcIndex, length);
         return this;
     }
 
     @Override
     public ByteBuf setBytes(int index, ByteBuffer src) {
-        checkIndex(index);
-        ByteBuffer tmpBuf = internalNioBuffer();
-        if (src == tmpBuf) {
-            src = src.duplicate();
-        }
-
-        index = idx(index);
-        tmpBuf.clear().position(index).limit(index + src.remaining());
-        tmpBuf.put(src);
+        UnsafeByteBufUtil.setBytes(this, addr(index), index, src);
         return this;
     }
 
     @Override
     public int setBytes(int index, InputStream in, int length) throws IOException {
-        checkIndex(index, length);
-        byte[] tmp = new byte[length];
-        int readBytes = in.read(tmp);
-        if (readBytes <= 0) {
-            return readBytes;
-        }
-        ByteBuffer tmpNioBuf = internalNioBuffer();
-        tmpNioBuf.clear().position(idx(index));
-        tmpNioBuf.put(tmp, 0, readBytes);
-        return readBytes;
+        return UnsafeByteBufUtil.setBytes(this, addr(index), index, in, length);
     }
 
     @Override
     public int setBytes(int index, ScatteringByteChannel in, int length) throws IOException {
         checkIndex(index, length);
-        ByteBuffer tmpNioBuf = internalNioBuffer();
+        ByteBuffer tmpBuf = internalNioBuffer();
         index = idx(index);
-        tmpNioBuf.clear().position(index).limit(index + length);
+        tmpBuf.clear().position(index).limit(index + length);
         try {
-            return in.read(tmpNioBuf);
-        } catch (ClosedChannelException e) {
+            return in.read(tmpBuf);
+        } catch (ClosedChannelException ignored) {
+            return -1;
+        }
+    }
+
+    @Override
+    public int setBytes(int index, FileChannel in, long position, int length) throws IOException {
+        checkIndex(index, length);
+        ByteBuffer tmpBuf = internalNioBuffer();
+        index = idx(index);
+        tmpBuf.clear().position(index).limit(index + length);
+        try {
+            return in.read(tmpBuf, position);
+        } catch (ClosedChannelException ignored) {
             return -1;
         }
     }
 
     @Override
     public ByteBuf copy(int index, int length) {
-        checkIndex(index, length);
-        PooledUnsafeDirectByteBuf copy = (PooledUnsafeDirectByteBuf) alloc().directBuffer(capacity(), maxCapacity());
-        PlatformDependent.copyMemory(addr(index), copy.addr(index), length);
-        copy.setIndex(index, index + length);
-        return copy;
+        return UnsafeByteBufUtil.copy(this, addr(index), index, length);
     }
 
     @Override
@@ -280,15 +315,22 @@ final class PooledUnsafeDirectByteBuf extends PooledByteBuf<ByteBuffer> {
     }
 
     @Override
-    public ByteBuffer nioBuffer(int index, int length) {
-        checkIndex(index, length);
-        index = idx(index);
-        return ((ByteBuffer) internalNioBuffer().clear().position(index).limit(index + length)).slice();
+    public ByteBuffer[] nioBuffers(int index, int length) {
+        return new ByteBuffer[] { nioBuffer(index, length) };
     }
 
     @Override
-    public ByteBuffer[] nioBuffers(int index, int length) {
-        return new ByteBuffer[] { nioBuffer(index, length) };
+    public ByteBuffer nioBuffer(int index, int length) {
+        checkIndex(index, length);
+        index = idx(index);
+        return ((ByteBuffer) memory.duplicate().position(index).limit(index + length)).slice();
+    }
+
+    @Override
+    public ByteBuffer internalNioBuffer(int index, int length) {
+        checkIndex(index, length);
+        index = idx(index);
+        return (ByteBuffer) internalNioBuffer().clear().position(index).limit(index + length);
     }
 
     @Override
@@ -306,7 +348,42 @@ final class PooledUnsafeDirectByteBuf extends PooledByteBuf<ByteBuffer> {
         throw new UnsupportedOperationException("direct buffer");
     }
 
+    @Override
+    public boolean hasMemoryAddress() {
+        return true;
+    }
+
+    @Override
+    public long memoryAddress() {
+        ensureAccessible();
+        return memoryAddress;
+    }
+
     private long addr(int index) {
         return memoryAddress + index;
+    }
+
+    @Override
+    protected SwappedByteBuf newSwappedByteBuf() {
+        if (PlatformDependent.isUnaligned()) {
+            // Only use if unaligned access is supported otherwise there is no gain.
+            return new UnsafeDirectSwappedByteBuf(this);
+        }
+        return super.newSwappedByteBuf();
+    }
+
+    @Override
+    public ByteBuf setZero(int index, int length) {
+        UnsafeByteBufUtil.setZero(this, addr(index), index, length);
+        return this;
+    }
+
+    @Override
+    public ByteBuf writeZero(int length) {
+        ensureWritable(length);
+        int wIndex = writerIndex;
+        setZero(wIndex, length);
+        writerIndex = wIndex + length;
+        return this;
     }
 }

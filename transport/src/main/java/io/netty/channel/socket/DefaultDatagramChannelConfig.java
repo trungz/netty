@@ -19,9 +19,13 @@ import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.DefaultChannelConfig;
-import io.netty.logging.InternalLogger;
-import io.netty.logging.InternalLoggerFactory;
+import io.netty.channel.FixedRecvByteBufAllocator;
+import io.netty.channel.MessageSizeEstimator;
+import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
 import io.netty.util.internal.PlatformDependent;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 import java.io.IOException;
 import java.net.DatagramSocket;
@@ -40,16 +44,14 @@ public class DefaultDatagramChannelConfig extends DefaultChannelConfig implement
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(DefaultDatagramChannelConfig.class);
 
-    private static final int DEFAULT_RECEIVE_PACKET_SIZE = 2048;
-
     private final DatagramSocket javaSocket;
-    private volatile int receivePacketSize = DEFAULT_RECEIVE_PACKET_SIZE;
+    private volatile boolean activeOnOpen;
 
     /**
      * Creates a new instance.
      */
     public DefaultDatagramChannelConfig(DatagramChannel channel, DatagramSocket javaSocket) {
-        super(channel);
+        super(channel, new FixedRecvByteBufAllocator(2048));
         if (javaSocket == null) {
             throw new NullPointerException("javaSocket");
         }
@@ -57,15 +59,16 @@ public class DefaultDatagramChannelConfig extends DefaultChannelConfig implement
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public Map<ChannelOption<?>, Object> getOptions() {
         return getOptions(
                 super.getOptions(),
                 SO_BROADCAST, SO_RCVBUF, SO_SNDBUF, SO_REUSEADDR, IP_MULTICAST_LOOP_DISABLED,
-                IP_MULTICAST_ADDR, IP_MULTICAST_IF, IP_MULTICAST_TTL, IP_TOS, UDP_RECEIVE_PACKET_SIZE);
+                IP_MULTICAST_ADDR, IP_MULTICAST_IF, IP_MULTICAST_TTL, IP_TOS, DATAGRAM_CHANNEL_ACTIVE_ON_REGISTRATION);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
+    @SuppressWarnings({ "unchecked", "deprecation" })
     public <T> T getOption(ChannelOption<T> option) {
         if (option == SO_BROADCAST) {
             return (T) Boolean.valueOf(isBroadcast());
@@ -76,9 +79,6 @@ public class DefaultDatagramChannelConfig extends DefaultChannelConfig implement
         if (option == SO_SNDBUF) {
             return (T) Integer.valueOf(getSendBufferSize());
         }
-        if (option == UDP_RECEIVE_PACKET_SIZE) {
-            return (T) Integer.valueOf(getReceivePacketSize());
-        }
         if (option == SO_REUSEADDR) {
             return (T) Boolean.valueOf(isReuseAddress());
         }
@@ -86,12 +86,10 @@ public class DefaultDatagramChannelConfig extends DefaultChannelConfig implement
             return (T) Boolean.valueOf(isLoopbackModeDisabled());
         }
         if (option == IP_MULTICAST_ADDR) {
-            T i = (T) getInterface();
-            return i;
+            return (T) getInterface();
         }
         if (option == IP_MULTICAST_IF) {
-            T i = (T) getNetworkInterface();
-            return i;
+            return (T) getNetworkInterface();
         }
         if (option == IP_MULTICAST_TTL) {
             return (T) Integer.valueOf(getTimeToLive());
@@ -99,11 +97,14 @@ public class DefaultDatagramChannelConfig extends DefaultChannelConfig implement
         if (option == IP_TOS) {
             return (T) Integer.valueOf(getTrafficClass());
         }
-
+        if (option == DATAGRAM_CHANNEL_ACTIVE_ON_REGISTRATION) {
+            return (T) Boolean.valueOf(activeOnOpen);
+        }
         return super.getOption(option);
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public <T> boolean setOption(ChannelOption<T> option, T value) {
         validate(option, value);
 
@@ -125,13 +126,20 @@ public class DefaultDatagramChannelConfig extends DefaultChannelConfig implement
             setTimeToLive((Integer) value);
         } else if (option == IP_TOS) {
             setTrafficClass((Integer) value);
-        } else if (option == UDP_RECEIVE_PACKET_SIZE) {
-            setReceivePacketSize((Integer) value);
+        } else if (option == DATAGRAM_CHANNEL_ACTIVE_ON_REGISTRATION) {
+            setActiveOnOpen((Boolean) value);
         } else {
             return super.setOption(option, value);
         }
 
         return true;
+    }
+
+    private void setActiveOnOpen(boolean activeOnOpen) {
+        if (channel.isRegistered()) {
+            throw new IllegalStateException("Can only changed before channel was registered");
+        }
+        this.activeOnOpen = activeOnOpen;
     }
 
     @Override
@@ -148,8 +156,8 @@ public class DefaultDatagramChannelConfig extends DefaultChannelConfig implement
         try {
             // See: https://github.com/netty/netty/issues/576
             if (broadcast &&
-                !PlatformDependent.isWindows() && !PlatformDependent.isRoot() &&
-                !javaSocket.getLocalAddress().isAnyLocalAddress()) {
+                !javaSocket.getLocalAddress().isAnyLocalAddress() &&
+                !PlatformDependent.isWindows() && !PlatformDependent.maybeSuperUser()) {
                 // Warn a user about the fact that a non-root user can't receive a
                 // broadcast packet on *nix if the socket is bound on non-wildcard address.
                 logger.warn(
@@ -305,21 +313,6 @@ public class DefaultDatagramChannelConfig extends DefaultChannelConfig implement
     }
 
     @Override
-    public int getReceivePacketSize() {
-        return receivePacketSize;
-    }
-
-    @Override
-    public DatagramChannelConfig setReceivePacketSize(int receivePacketSize) {
-        if (receivePacketSize <= 0) {
-            throw new IllegalArgumentException(
-                    String.format("receivePacketSize: %d (expected: > 0)", receivePacketSize));
-        }
-        this.receivePacketSize = receivePacketSize;
-        return this;
-    }
-
-    @Override
     public int getTimeToLive() {
         if (javaSocket instanceof MulticastSocket) {
             try {
@@ -367,21 +360,68 @@ public class DefaultDatagramChannelConfig extends DefaultChannelConfig implement
 
     @Override
     public DatagramChannelConfig setWriteSpinCount(int writeSpinCount) {
-        return (DatagramChannelConfig) super.setWriteSpinCount(writeSpinCount);
+        super.setWriteSpinCount(writeSpinCount);
+        return this;
     }
 
     @Override
     public DatagramChannelConfig setConnectTimeoutMillis(int connectTimeoutMillis) {
-        return (DatagramChannelConfig) super.setConnectTimeoutMillis(connectTimeoutMillis);
+        super.setConnectTimeoutMillis(connectTimeoutMillis);
+        return this;
+    }
+
+    @Override
+    @Deprecated
+    public DatagramChannelConfig setMaxMessagesPerRead(int maxMessagesPerRead) {
+        super.setMaxMessagesPerRead(maxMessagesPerRead);
+        return this;
     }
 
     @Override
     public DatagramChannelConfig setAllocator(ByteBufAllocator allocator) {
-        return (DatagramChannelConfig) super.setAllocator(allocator);
+        super.setAllocator(allocator);
+        return this;
+    }
+
+    @Override
+    public DatagramChannelConfig setRecvByteBufAllocator(RecvByteBufAllocator allocator) {
+        super.setRecvByteBufAllocator(allocator);
+        return this;
     }
 
     @Override
     public DatagramChannelConfig setAutoRead(boolean autoRead) {
-        return (DatagramChannelConfig) super.setAutoRead(autoRead);
+        super.setAutoRead(autoRead);
+        return this;
+    }
+
+    @Override
+    public DatagramChannelConfig setAutoClose(boolean autoClose) {
+        super.setAutoClose(autoClose);
+        return this;
+    }
+
+    @Override
+    public DatagramChannelConfig setWriteBufferHighWaterMark(int writeBufferHighWaterMark) {
+        super.setWriteBufferHighWaterMark(writeBufferHighWaterMark);
+        return this;
+    }
+
+    @Override
+    public DatagramChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark) {
+        super.setWriteBufferLowWaterMark(writeBufferLowWaterMark);
+        return this;
+    }
+
+    @Override
+    public DatagramChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark) {
+        super.setWriteBufferWaterMark(writeBufferWaterMark);
+        return this;
+    }
+
+    @Override
+    public DatagramChannelConfig setMessageSizeEstimator(MessageSizeEstimator estimator) {
+        super.setMessageSizeEstimator(estimator);
+        return this;
     }
 }

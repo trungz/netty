@@ -15,26 +15,31 @@
  */
 package io.netty.channel.udt;
 
-import static io.netty.channel.ChannelOption.*;
+import com.barchart.udt.nio.ChannelUDT;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.ChannelOption;
+import io.netty.channel.MessageSizeEstimator;
+import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
 
 import java.io.IOException;
 import java.util.Map;
 
-import com.barchart.udt.SocketUDT;
-import com.barchart.udt.nio.ChannelUDT;
+import static io.netty.channel.ChannelOption.SO_BACKLOG;
 
 /**
  * The default {@link UdtServerChannelConfig} implementation.
+ *
+ * @deprecated The UDT transport is no longer maintained and will be removed.
  */
+@Deprecated
 public class DefaultUdtServerChannelConfig extends DefaultUdtChannelConfig
         implements UdtServerChannelConfig {
 
     private volatile int backlog = 64;
 
-    public DefaultUdtServerChannelConfig(final UdtChannel channel,
-            final ChannelUDT channelUDT, final boolean apply)
-            throws IOException {
+    public DefaultUdtServerChannelConfig(
+            final UdtChannel channel, final ChannelUDT channelUDT, final boolean apply) throws IOException {
         super(channel, channelUDT, apply);
         if (apply) {
             apply(channelUDT);
@@ -43,7 +48,6 @@ public class DefaultUdtServerChannelConfig extends DefaultUdtChannelConfig
 
     @Override
     protected void apply(final ChannelUDT channelUDT) throws IOException {
-        final SocketUDT socketUDT = channelUDT.socketUDT();
         // nothing to apply for now.
     }
 
@@ -85,15 +89,15 @@ public class DefaultUdtServerChannelConfig extends DefaultUdtChannelConfig
 
     @Override
     public UdtServerChannelConfig setProtocolReceiveBufferSize(
-            final int protocolReceiveBuferSize) {
-        super.setProtocolReceiveBufferSize(protocolReceiveBuferSize);
+            final int protocolReceiveBufferSize) {
+        super.setProtocolReceiveBufferSize(protocolReceiveBufferSize);
         return this;
     }
 
     @Override
     public UdtServerChannelConfig setProtocolSendBufferSize(
-            final int protocolSendBuferSize) {
-        super.setProtocolSendBufferSize(protocolSendBuferSize);
+            final int protocolSendBufferSize) {
+        super.setProtocolSendBufferSize(protocolSendBufferSize);
         return this;
     }
 
@@ -124,8 +128,8 @@ public class DefaultUdtServerChannelConfig extends DefaultUdtChannelConfig
 
     @Override
     public UdtServerChannelConfig setSystemReceiveBufferSize(
-            final int systemSendBuferSize) {
-        super.setSystemReceiveBufferSize(systemSendBuferSize);
+            final int systemSendBufferSize) {
+        super.setSystemReceiveBufferSize(systemSendBufferSize);
         return this;
     }
 
@@ -136,4 +140,70 @@ public class DefaultUdtServerChannelConfig extends DefaultUdtChannelConfig
         return this;
     }
 
+    @Override
+    public UdtServerChannelConfig setConnectTimeoutMillis(int connectTimeoutMillis) {
+        super.setConnectTimeoutMillis(connectTimeoutMillis);
+        return this;
+    }
+
+    @Override
+    @Deprecated
+    public UdtServerChannelConfig setMaxMessagesPerRead(int maxMessagesPerRead) {
+        super.setMaxMessagesPerRead(maxMessagesPerRead);
+        return this;
+    }
+
+    @Override
+    public UdtServerChannelConfig setWriteSpinCount(int writeSpinCount) {
+        super.setWriteSpinCount(writeSpinCount);
+        return this;
+    }
+
+    @Override
+    public UdtServerChannelConfig setAllocator(ByteBufAllocator allocator) {
+        super.setAllocator(allocator);
+        return this;
+    }
+
+    @Override
+    public UdtServerChannelConfig setRecvByteBufAllocator(RecvByteBufAllocator allocator) {
+        super.setRecvByteBufAllocator(allocator);
+        return this;
+    }
+
+    @Override
+    public UdtServerChannelConfig setAutoRead(boolean autoRead) {
+        super.setAutoRead(autoRead);
+        return this;
+    }
+
+    @Override
+    public UdtServerChannelConfig setAutoClose(boolean autoClose) {
+        super.setAutoClose(autoClose);
+        return this;
+    }
+
+    @Override
+    public UdtServerChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark) {
+        super.setWriteBufferLowWaterMark(writeBufferLowWaterMark);
+        return this;
+    }
+
+    @Override
+    public UdtServerChannelConfig setWriteBufferHighWaterMark(int writeBufferHighWaterMark) {
+        super.setWriteBufferHighWaterMark(writeBufferHighWaterMark);
+        return this;
+    }
+
+    @Override
+    public UdtServerChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark) {
+        super.setWriteBufferWaterMark(writeBufferWaterMark);
+        return this;
+    }
+
+    @Override
+    public UdtServerChannelConfig setMessageSizeEstimator(MessageSizeEstimator estimator) {
+        super.setMessageSizeEstimator(estimator);
+        return this;
+    }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2013 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -20,7 +20,7 @@ import io.netty.buffer.ByteBufHolder;
 import io.netty.buffer.Unpooled;
 
 /**
- * A SPDY Protocol Data Frame
+ * A SPDY Protocol DATA Frame
  */
 public interface SpdyDataFrame extends ByteBufHolder, SpdyStreamFrame {
 
@@ -37,8 +37,29 @@ public interface SpdyDataFrame extends ByteBufHolder, SpdyStreamFrame {
      * The data payload cannot exceed 16777215 bytes.
      */
     @Override
-    ByteBuf data();
+    ByteBuf content();
 
     @Override
     SpdyDataFrame copy();
+
+    @Override
+    SpdyDataFrame duplicate();
+
+    @Override
+    SpdyDataFrame retainedDuplicate();
+
+    @Override
+    SpdyDataFrame replace(ByteBuf content);
+
+    @Override
+    SpdyDataFrame retain();
+
+    @Override
+    SpdyDataFrame retain(int increment);
+
+    @Override
+    SpdyDataFrame touch();
+
+    @Override
+    SpdyDataFrame touch(Object hint);
 }

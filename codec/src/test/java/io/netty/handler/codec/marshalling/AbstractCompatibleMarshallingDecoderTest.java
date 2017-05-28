@@ -18,9 +18,7 @@ package io.netty.handler.codec.marshalling;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.embedded.EmbeddedByteChannel;
-import io.netty.handler.codec.CodecException;
-import io.netty.handler.codec.TooLongFrameException;
+import io.netty.channel.embedded.EmbeddedChannel;
 import org.jboss.marshalling.Marshaller;
 import org.jboss.marshalling.MarshallerFactory;
 import org.jboss.marshalling.Marshalling;
@@ -30,9 +28,12 @@ import org.junit.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
-public abstract class AbstractCompatibleMarshallingDecoderTest {
+public abstract class AbstractCompatibleMarshallingDecoderTest extends AbstractMarshallingTest {
     @SuppressWarnings("RedundantStringConstructorCall")
     private final String testObject = new String("test");
 
@@ -41,7 +42,7 @@ public abstract class AbstractCompatibleMarshallingDecoderTest {
         MarshallerFactory marshallerFactory = createMarshallerFactory();
         MarshallingConfiguration configuration = createMarshallingConfig();
 
-        EmbeddedByteChannel ch = new EmbeddedByteChannel(createDecoder(Integer.MAX_VALUE));
+        EmbeddedChannel ch = new EmbeddedChannel(createDecoder(Integer.MAX_VALUE));
 
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
         Marshaller marshaller = marshallerFactory.createMarshaller(configuration);
@@ -55,7 +56,7 @@ public abstract class AbstractCompatibleMarshallingDecoderTest {
         ch.writeInbound(input(testBytes));
         assertTrue(ch.finish());
 
-        String unmarshalled = (String) ch.readInbound();
+        String unmarshalled = ch.readInbound();
 
         assertEquals(testObject, unmarshalled);
 
@@ -71,7 +72,7 @@ public abstract class AbstractCompatibleMarshallingDecoderTest {
         MarshallerFactory marshallerFactory = createMarshallerFactory();
         MarshallingConfiguration configuration = createMarshallingConfig();
 
-        EmbeddedByteChannel ch = new EmbeddedByteChannel(createDecoder(Integer.MAX_VALUE));
+        EmbeddedChannel ch = new EmbeddedChannel(createDecoder(Integer.MAX_VALUE));
 
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
         Marshaller marshaller = marshallerFactory.createMarshaller(configuration);
@@ -83,13 +84,13 @@ public abstract class AbstractCompatibleMarshallingDecoderTest {
         byte[] testBytes = bout.toByteArray();
 
         ByteBuf buffer = input(testBytes);
-        ByteBuf slice = buffer.readSlice(2);
+        ByteBuf slice = buffer.readRetainedSlice(2);
 
         ch.writeInbound(slice);
         ch.writeInbound(buffer);
         assertTrue(ch.finish());
 
-        String unmarshalled = (String) ch.readInbound();
+        String unmarshalled = ch.readInbound();
 
         assertEquals(testObject, unmarshalled);
 
@@ -102,7 +103,7 @@ public abstract class AbstractCompatibleMarshallingDecoderTest {
         MarshallingConfiguration configuration = createMarshallingConfig();
 
         ChannelHandler mDecoder = createDecoder(4);
-        EmbeddedByteChannel ch = new EmbeddedByteChannel(mDecoder);
+        EmbeddedChannel ch = new EmbeddedChannel(mDecoder);
 
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
         Marshaller marshaller = marshallerFactory.createMarshaller(configuration);
@@ -112,21 +113,21 @@ public abstract class AbstractCompatibleMarshallingDecoderTest {
         marshaller.close();
 
         byte[] testBytes = bout.toByteArray();
-        try {
-            ch.writeInbound(input(testBytes));
-            fail();
-        } catch (CodecException e) {
-            assertEquals(TooLongFrameException.class, e.getClass());
-        }
+        onTooBigFrame(ch, input(testBytes));
+    }
+
+    protected void onTooBigFrame(EmbeddedChannel ch, ByteBuf input) {
+        ch.writeInbound(input);
+        assertFalse(ch.isActive());
     }
 
     protected ChannelHandler createDecoder(int maxObjectSize) {
-        return new CompatibleMarshallingDecoder(createProvider(createMarshallerFactory(), createMarshallingConfig()), maxObjectSize);
+        return new CompatibleMarshallingDecoder(createProvider(createMarshallerFactory(),
+                createMarshallingConfig()), maxObjectSize);
     }
 
     protected UnmarshallerProvider createProvider(MarshallerFactory factory, MarshallingConfiguration config) {
         return new DefaultUnmarshallerProvider(factory, config);
-
     }
 
     protected abstract MarshallerFactory createMarshallerFactory();

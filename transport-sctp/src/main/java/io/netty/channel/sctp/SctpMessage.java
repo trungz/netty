@@ -17,7 +17,6 @@ package io.netty.channel.sctp;
 
 import com.sun.nio.sctp.MessageInfo;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufUtil;
 import io.netty.buffer.DefaultByteBufHolder;
 
 /**
@@ -26,6 +25,7 @@ import io.netty.buffer.DefaultByteBufHolder;
 public final class SctpMessage extends DefaultByteBufHolder {
     private final int streamIdentifier;
     private final int protocolIdentifier;
+    private final boolean unordered;
 
     private final MessageInfo msgInfo;
 
@@ -36,9 +36,21 @@ public final class SctpMessage extends DefaultByteBufHolder {
      * @param payloadBuffer channel buffer
      */
     public SctpMessage(int protocolIdentifier, int streamIdentifier, ByteBuf payloadBuffer) {
+        this(protocolIdentifier, streamIdentifier, false, payloadBuffer);
+    }
+
+    /**
+     * Essential data that is being carried within SCTP Data Chunk
+     * @param protocolIdentifier of payload
+     * @param streamIdentifier that you want to send the payload
+     * @param unordered if {@literal true}, the SCTP Data Chunk will be sent with the U (unordered) flag set.
+     * @param payloadBuffer channel buffer
+     */
+    public SctpMessage(int protocolIdentifier, int streamIdentifier, boolean unordered, ByteBuf payloadBuffer) {
         super(payloadBuffer);
         this.protocolIdentifier = protocolIdentifier;
         this.streamIdentifier = streamIdentifier;
+        this.unordered = unordered;
         msgInfo = null;
     }
 
@@ -55,6 +67,7 @@ public final class SctpMessage extends DefaultByteBufHolder {
         this.msgInfo = msgInfo;
         streamIdentifier = msgInfo.streamNumber();
         protocolIdentifier = msgInfo.payloadProtocolID();
+        unordered = msgInfo.isUnordered();
     }
 
     /**
@@ -69,6 +82,13 @@ public final class SctpMessage extends DefaultByteBufHolder {
      */
     public int protocolIdentifier() {
         return protocolIdentifier;
+    }
+
+    /**
+     * return the unordered flag
+     */
+    public boolean isUnordered() {
+        return unordered;
     }
 
     /**
@@ -111,39 +131,76 @@ public final class SctpMessage extends DefaultByteBufHolder {
             return false;
         }
 
-        if (!data().equals(sctpFrame.data())) {
+        if (unordered != sctpFrame.unordered) {
             return false;
         }
 
-        return true;
+        return content().equals(sctpFrame.content());
     }
 
     @Override
     public int hashCode() {
         int result = streamIdentifier;
         result = 31 * result + protocolIdentifier;
-        result = 31 * result + data().hashCode();
+        // values 1231 and 1237 are referenced in the javadocs of Boolean#hashCode()
+        result = 31 * result + (unordered ? 1231 : 1237);
+        result = 31 * result + content().hashCode();
         return result;
     }
 
     @Override
     public SctpMessage copy() {
+        return (SctpMessage) super.copy();
+    }
+
+    @Override
+    public SctpMessage duplicate() {
+        return (SctpMessage) super.duplicate();
+    }
+
+    @Override
+    public SctpMessage retainedDuplicate() {
+        return (SctpMessage) super.retainedDuplicate();
+    }
+
+    @Override
+    public SctpMessage replace(ByteBuf content) {
         if (msgInfo == null) {
-            return new SctpMessage(protocolIdentifier, streamIdentifier, data().copy());
+            return new SctpMessage(protocolIdentifier, streamIdentifier, unordered, content);
         } else {
-            return new SctpMessage(msgInfo, data().copy());
+            return new SctpMessage(msgInfo, content);
         }
     }
 
     @Override
+    public SctpMessage retain() {
+        super.retain();
+        return this;
+    }
+
+    @Override
+    public SctpMessage retain(int increment) {
+        super.retain(increment);
+        return this;
+    }
+
+    @Override
+    public SctpMessage touch() {
+        super.touch();
+        return this;
+    }
+
+    @Override
+    public SctpMessage touch(Object hint) {
+        super.touch(hint);
+        return this;
+    }
+
+    @Override
     public String toString() {
-        if (isFreed()) {
-            return "SctpFrame{" +
-                    "streamIdentifier=" + streamIdentifier + ", protocolIdentifier=" + protocolIdentifier +
-                    ", data=(FREED)}";
-        }
         return "SctpFrame{" +
-                "streamIdentifier=" + streamIdentifier + ", protocolIdentifier=" + protocolIdentifier +
-                ", data=" + ByteBufUtil.hexDump(data()) + '}';
+               "streamIdentifier=" + streamIdentifier + ", protocolIdentifier=" + protocolIdentifier +
+               ", unordered=" + unordered +
+               ", data=" + contentToString() + '}';
     }
 }

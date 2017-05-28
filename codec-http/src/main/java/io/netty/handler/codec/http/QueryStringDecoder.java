@@ -26,15 +26,19 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static io.netty.util.internal.ObjectUtil.checkNotNull;
+import static io.netty.util.internal.ObjectUtil.checkPositive;
+import static io.netty.util.internal.StringUtil.EMPTY_STRING;
+
 /**
  * Splits an HTTP query string into a path string and key-value parameter pairs.
  * This decoder is for one time use only.  Create a new instance for each URI:
  * <pre>
  * {@link QueryStringDecoder} decoder = new {@link QueryStringDecoder}("/hello?recipient=world&x=1;y=2");
- * assert decoder.getPath().equals("/hello");
- * assert decoder.getParameters().get("recipient").get(0).equals("world");
- * assert decoder.getParameters().get("x").get(0).equals("1");
- * assert decoder.getParameters().get("y").get(0).equals("2");
+ * assert decoder.path().equals("/hello");
+ * assert decoder.parameters().get("recipient").get(0).equals("world");
+ * assert decoder.parameters().get("x").get(0).equals("1");
+ * assert decoder.parameters().get("y").get(0).equals("2");
  * </pre>
  *
  * This decoder can also decode the content of an HTTP POST request whose
@@ -46,15 +50,12 @@ import java.util.Map;
  *
  * <h3>HashDOS vulnerability fix</h3>
  *
- * As a workaround to the <a href="http://goo.gl/I4Nky">HashDOS</a> vulnerability, the decoder
+ * As a workaround to the <a href="http://netty.io/s/hashdos">HashDOS</a> vulnerability, the decoder
  * limits the maximum number of decoded key-value parameter pairs, up to {@literal 1024} by
  * default, and you can configure it when you construct the decoder by passing an additional
  * integer parameter.
  *
  * @see QueryStringEncoder
- *
- * @apiviz.stereotype utility
- * @apiviz.has        io.netty.handler.codec.http.FullHttpRequest oneway - - decodes
  */
 public class QueryStringDecoder {
 
@@ -105,19 +106,11 @@ public class QueryStringDecoder {
      * specified charset.
      */
     public QueryStringDecoder(String uri, Charset charset, boolean hasPath, int maxParams) {
-        if (uri == null) {
-            throw new NullPointerException("getUri");
-        }
-        if (charset == null) {
-            throw new NullPointerException("charset");
-        }
-        if (maxParams <= 0) {
-            throw new IllegalArgumentException(
-                    "maxParams: " + maxParams + " (expected: a positive integer)");
-        }
+        checkNotNull(uri, "uri");
+        checkNotNull(charset, "charset");
+        checkPositive(maxParams, "maxParams");
 
-        // http://en.wikipedia.org/wiki/Query_string
-        this.uri = uri.replace(';', '&');
+        this.uri = uri;
         this.charset = charset;
         this.maxParams = maxParams;
         this.hasPath = hasPath;
@@ -144,31 +137,29 @@ public class QueryStringDecoder {
      * specified charset.
      */
     public QueryStringDecoder(URI uri, Charset charset, int maxParams) {
-        if (uri == null) {
-            throw new NullPointerException("getUri");
-        }
-        if (charset == null) {
-            throw new NullPointerException("charset");
-        }
-        if (maxParams <= 0) {
-            throw new IllegalArgumentException(
-                    "maxParams: " + maxParams + " (expected: a positive integer)");
-        }
+        checkNotNull(uri, "uri");
+        checkNotNull(charset, "charset");
+        checkPositive(maxParams, "maxParams");
 
         String rawPath = uri.getRawPath();
         if (rawPath != null) {
             hasPath = true;
         } else {
-            rawPath = "";
+            rawPath = EMPTY_STRING;
             hasPath = false;
         }
         // Also take care of cut of things like "http://localhost"
-        String newUri = rawPath + '?' + uri.getRawQuery();
+        this.uri = uri.getRawQuery() == null? rawPath : rawPath + '?' + uri.getRawQuery();
 
-        // http://en.wikipedia.org/wiki/Query_string
-        this.uri = newUri.replace(';', '&');
         this.charset = charset;
         this.maxParams = maxParams;
+    }
+
+    /**
+     * Returns the uri used to initialize this {@link QueryStringDecoder}.
+     */
+    public String uri() {
+        return uri;
     }
 
     /**
@@ -177,14 +168,10 @@ public class QueryStringDecoder {
     public String path() {
         if (path == null) {
             if (!hasPath) {
-                return path = "";
-            }
-
-            int pathEndPos = uri.indexOf('?');
-            if (pathEndPos < 0) {
-                path = uri;
+                path = EMPTY_STRING;
             } else {
-                return path = uri.substring(0, pathEndPos);
+                int pathEndPos = uri.indexOf('?');
+                path = decodeComponent(pathEndPos < 0 ? uri : uri.substring(0, pathEndPos), charset);
             }
         }
         return path;
@@ -196,16 +183,18 @@ public class QueryStringDecoder {
     public Map<String, List<String>> parameters() {
         if (params == null) {
             if (hasPath) {
-                int pathLength = path().length();
-                if (uri.length() == pathLength) {
-                    return Collections.emptyMap();
+                int pathEndPos = uri.indexOf('?');
+                if (pathEndPos >= 0 && pathEndPos < uri.length() - 1) {
+                    decodeParams(uri.substring(pathEndPos + 1));
+                } else {
+                    params = Collections.emptyMap();
                 }
-                decodeParams(uri.substring(pathLength + 1));
             } else {
                 if (uri.isEmpty()) {
-                    return Collections.emptyMap();
+                    params = Collections.emptyMap();
+                } else {
+                    decodeParams(uri);
                 }
-                decodeParams(uri);
             }
         }
         return params;
@@ -225,12 +214,13 @@ public class QueryStringDecoder {
                     name = decodeComponent(s.substring(pos, i), charset);
                 }
                 pos = i + 1;
-            } else if (c == '&') {
+            // http://www.w3.org/TR/html401/appendix/notes.html#h-B.2.2
+            } else if (c == '&' || c == ';') {
                 if (name == null && pos != i) {
                     // We haven't seen an `=' so far but moved forward.
                     // Must be a param of the form '&a&' so add it with
                     // an empty value.
-                    if (!addParam(params, decodeComponent(s.substring(pos, i), charset), "")) {
+                    if (!addParam(params, decodeComponent(s.substring(pos, i), charset), EMPTY_STRING)) {
                         return;
                     }
                 } else if (name != null) {
@@ -245,7 +235,7 @@ public class QueryStringDecoder {
 
         if (pos != i) {  // Are there characters we haven't dealt with?
             if (name == null) {     // Yes and we haven't seen any `='.
-                addParam(params, decodeComponent(s.substring(pos, i), charset), "");
+                addParam(params, decodeComponent(s.substring(pos, i), charset), EMPTY_STRING);
             } else {                // Yes and this must be the last value.
                 addParam(params, name, decodeComponent(s.substring(pos, i), charset));
             }
@@ -306,23 +296,17 @@ public class QueryStringDecoder {
      * @throws IllegalArgumentException if the string contains a malformed
      * escape sequence.
      */
-    @SuppressWarnings("fallthrough")
-    public static String decodeComponent(final String s,
-                                         final Charset charset) {
+    public static String decodeComponent(final String s, final Charset charset) {
         if (s == null) {
-            return "";
+            return EMPTY_STRING;
         }
         final int size = s.length();
         boolean modified = false;
         for (int i = 0; i < size; i++) {
             final char c = s.charAt(i);
-            switch (c) {
-                case '%':
-                    i++;  // We can skip at least one char, e.g. `%%'.
-                    // Fall through.
-                case '+':
-                    modified = true;
-                    break;
+            if (c == '%' || c == '+') {
+                modified = true;
+                break;
             }
         }
         if (!modified) {

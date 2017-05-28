@@ -20,7 +20,7 @@
   <parent>
     <groupId>io.netty</groupId>
     <artifactId>netty-parent</artifactId>
-    <version>4.0.0.Beta1-SNAPSHOT</version>
+    <version>4.1.12.Final-SNAPSHOT</version>
   </parent>
 
   <artifactId>netty-testsuite</artifactId>
@@ -30,9 +30,9 @@
 
   <dependencies>
     <dependency>
-        <groupId>${project.groupId}</groupId>
-        <artifactId>netty-transport-sctp</artifactId>
-        <version>${project.version}</version>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>netty-transport-sctp</artifactId>
+      <version>${project.version}</version>
     </dependency>
     <dependency>
       <groupId>${project.groupId}</groupId>
@@ -44,14 +44,60 @@
       <artifactId>netty-codec-http</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <dependency>
+      <groupId>io.netty</groupId>
+      <artifactId>netty-transport-udt</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>${tcnative.artifactId}</artifactId>
+      <classifier>${tcnative.classifier}</classifier>
+      <optional>true</optional>
+    </dependency>
+
+    <!-- Required for generating a compressed heap dump file -->
+    <dependency>
+      <groupId>org.tukaani</groupId>
+      <artifactId>xz</artifactId>
+    </dependency>
+
+    <!-- Testing frameworks and related dependencies -->
+    <!-- NOTE: Keep these dependencies in sync with the parent POM's common test dependencies. -->
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.hamcrest</groupId>
+      <artifactId>hamcrest-library</artifactId>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <scope>compile</scope>
+    </dependency>
   </dependencies>
+
+  <properties>
+    <!-- Needed for SSL tests as these use the SelfSignedCertificate --> 
+    <argLine.java9.extras>--add-exports java.base/sun.security.x509=ALL-UNNAMED</argLine.java9.extras>
+  </properties>
 
   <build>
     <plugins>
       <plugin>
-        <artifactId>maven-deploy-plugin</artifactId>
+        <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <skip>true</skip>
+          <testSourceDirectory>${project.build.sourceDirectory}</testSourceDirectory>
+          <testClassesDirectory>${project.build.outputDirectory}</testClassesDirectory>
         </configuration>
       </plugin>
     </plugins>

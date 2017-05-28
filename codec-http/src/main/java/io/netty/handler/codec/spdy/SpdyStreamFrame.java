@@ -16,14 +16,14 @@
 package io.netty.handler.codec.spdy;
 
 /**
- * A frame which is part of a stream
+ * A SPDY Protocol Frame that is associated with an individual SPDY Stream
  */
-public interface SpdyStreamFrame {
+public interface SpdyStreamFrame extends SpdyFrame {
 
     /**
      * Returns the Stream-ID of this frame.
      */
-    int getStreamId();
+    int streamId();
 
     /**
      * Sets the Stream-ID of this frame.  The Stream-ID must be positive.

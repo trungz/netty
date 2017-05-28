@@ -15,6 +15,8 @@
  */
 package io.netty.buffer;
 
+import io.netty.util.ReferenceCounted;
+
 import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.EOFException;
@@ -34,19 +36,27 @@ import java.io.InputStream;
  * This stream implements {@link DataInput} for your convenience.
  * The endianness of the stream is not always big endian but depends on
  * the endianness of the underlying buffer.
+ *
  * @see ByteBufOutputStream
- * @apiviz.uses io.netty.buffer.ByteBuf
  */
 public class ByteBufInputStream extends InputStream implements DataInput {
-
     private final ByteBuf buffer;
     private final int startIndex;
     private final int endIndex;
+    private boolean closed;
+    /**
+     * To preserve backwards compatibility (which didn't transfer ownership) we support a conditional flag which
+     * indicates if {@link #buffer} should be released when this {@link InputStream} is closed.
+     * However in future releases ownership should always be transferred and callers of this class should call
+     * {@link ReferenceCounted#retain()} if necessary.
+     */
+    private final boolean releaseOnClose;
 
     /**
      * Creates a new stream which reads data from the specified {@code buffer}
      * starting at the current {@code readerIndex} and ending at the current
      * {@code writerIndex}.
+     * @param buffer The buffer which provides the content for this {@link InputStream}.
      */
     public ByteBufInputStream(ByteBuf buffer) {
         this(buffer, buffer.readableBytes());
@@ -56,23 +66,59 @@ public class ByteBufInputStream extends InputStream implements DataInput {
      * Creates a new stream which reads data from the specified {@code buffer}
      * starting at the current {@code readerIndex} and ending at
      * {@code readerIndex + length}.
-     *
+     * @param buffer The buffer which provides the content for this {@link InputStream}.
+     * @param length The length of the buffer to use for this {@link InputStream}.
      * @throws IndexOutOfBoundsException
      *         if {@code readerIndex + length} is greater than
      *            {@code writerIndex}
      */
     public ByteBufInputStream(ByteBuf buffer, int length) {
+        this(buffer, length, false);
+    }
+
+    /**
+     * Creates a new stream which reads data from the specified {@code buffer}
+     * starting at the current {@code readerIndex} and ending at the current
+     * {@code writerIndex}.
+     * @param buffer The buffer which provides the content for this {@link InputStream}.
+     * @param releaseOnClose {@code true} means that when {@link #close()} is called then {@link ByteBuf#release()} will
+     *                       be called on {@code buffer}.
+     */
+    public ByteBufInputStream(ByteBuf buffer, boolean releaseOnClose) {
+        this(buffer, buffer.readableBytes(), releaseOnClose);
+    }
+
+    /**
+     * Creates a new stream which reads data from the specified {@code buffer}
+     * starting at the current {@code readerIndex} and ending at
+     * {@code readerIndex + length}.
+     * @param buffer The buffer which provides the content for this {@link InputStream}.
+     * @param length The length of the buffer to use for this {@link InputStream}.
+     * @param releaseOnClose {@code true} means that when {@link #close()} is called then {@link ByteBuf#release()} will
+     *                       be called on {@code buffer}.
+     * @throws IndexOutOfBoundsException
+     *         if {@code readerIndex + length} is greater than
+     *            {@code writerIndex}
+     */
+    public ByteBufInputStream(ByteBuf buffer, int length, boolean releaseOnClose) {
         if (buffer == null) {
             throw new NullPointerException("buffer");
         }
         if (length < 0) {
+            if (releaseOnClose) {
+                buffer.release();
+            }
             throw new IllegalArgumentException("length: " + length);
         }
         if (length > buffer.readableBytes()) {
+            if (releaseOnClose) {
+                buffer.release();
+            }
             throw new IndexOutOfBoundsException("Too many bytes to be read - Needs "
                     + length + ", maximum is " + buffer.readableBytes());
         }
 
+        this.releaseOnClose = releaseOnClose;
         this.buffer = buffer;
         startIndex = buffer.readerIndex();
         endIndex = startIndex + length;
@@ -84,6 +130,19 @@ public class ByteBufInputStream extends InputStream implements DataInput {
      */
     public int readBytes() {
         return buffer.readerIndex() - startIndex;
+    }
+
+    @Override
+    public void close() throws IOException {
+        try {
+            super.close();
+        } finally {
+            // The Closable interface says "If the stream is already closed then invoking this method has no effect."
+            if (releaseOnClose && !closed) {
+                closed = true;
+                buffer.release();
+            }
+        }
     }
 
     @Override
@@ -186,21 +245,25 @@ public class ByteBufInputStream extends InputStream implements DataInput {
     @Override
     public String readLine() throws IOException {
         lineBuf.setLength(0);
-        for (;;) {
-            int b = read();
-            if (b == -1 && lineBuf.length() == 0) {
-                return null;
-            }
-            if (b < 0 || b == '\n') {
-                break;
+
+        loop: while (true) {
+            if (!buffer.isReadable()) {
+                return lineBuf.length() > 0 ? lineBuf.toString() : null;
             }
 
-            lineBuf.append((char) b);
-        }
+            int c = buffer.readUnsignedByte();
+            switch (c) {
+                case '\n':
+                    break loop;
 
-        if (lineBuf.length() > 0) {
-            while (lineBuf.charAt(lineBuf.length() - 1) == '\r') {
-                lineBuf.setLength(lineBuf.length() - 1);
+                case '\r':
+                    if (buffer.isReadable() && (char) buffer.getUnsignedByte(buffer.readerIndex()) == '\n') {
+                        buffer.skipBytes(1);
+                    }
+                    break loop;
+
+                default:
+                    lineBuf.append((char) c);
             }
         }
 

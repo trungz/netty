@@ -18,52 +18,48 @@ package io.netty.handler.codec.socks;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ReplayingDecoder;
-import io.netty.util.CharsetUtil;
+import io.netty.handler.codec.socks.SocksAuthRequestDecoder.State;
+
+import java.util.List;
 
 /**
  * Decodes {@link ByteBuf}s into {@link SocksAuthRequest}.
  * Before returning SocksRequest decoder removes itself from pipeline.
  */
-public class SocksAuthRequestDecoder extends ReplayingDecoder<SocksAuthRequestDecoder.State> {
-    private static final String name = "SOCKS_AUTH_REQUEST_DECODER";
+public class SocksAuthRequestDecoder extends ReplayingDecoder<State> {
 
-    public static String getName() {
-        return name;
-    }
-
-    private SocksMessage.SubnegotiationVersion version;
-    private int fieldLength;
     private String username;
-    private String password;
-    private SocksRequest msg = SocksCommonUtils.UNKNOWN_SOCKS_REQUEST;
 
     public SocksAuthRequestDecoder() {
         super(State.CHECK_PROTOCOL_VERSION);
     }
 
     @Override
-    public Object decode(ChannelHandlerContext ctx, ByteBuf byteBuf) throws Exception {
+    protected void decode(ChannelHandlerContext ctx, ByteBuf byteBuf, List<Object> out) throws Exception {
         switch (state()) {
             case CHECK_PROTOCOL_VERSION: {
-                version = SocksMessage.SubnegotiationVersion.fromByte(byteBuf.readByte());
-                if (version != SocksMessage.SubnegotiationVersion.AUTH_PASSWORD) {
+                if (byteBuf.readByte() != SocksSubnegotiationVersion.AUTH_PASSWORD.byteValue()) {
+                    out.add(SocksCommonUtils.UNKNOWN_SOCKS_REQUEST);
                     break;
                 }
                 checkpoint(State.READ_USERNAME);
             }
             case READ_USERNAME: {
-                fieldLength = byteBuf.readByte();
-                username = byteBuf.readBytes(fieldLength).toString(CharsetUtil.US_ASCII);
+                int fieldLength = byteBuf.readByte();
+                username = SocksCommonUtils.readUsAscii(byteBuf, fieldLength);
                 checkpoint(State.READ_PASSWORD);
             }
             case READ_PASSWORD: {
-                fieldLength = byteBuf.readByte();
-                password = byteBuf.readBytes(fieldLength).toString(CharsetUtil.US_ASCII);
-                msg = new SocksAuthRequest(username, password);
+                int fieldLength = byteBuf.readByte();
+                String password = SocksCommonUtils.readUsAscii(byteBuf, fieldLength);
+                out.add(new SocksAuthRequest(username, password));
+                break;
+            }
+            default: {
+                throw new Error();
             }
         }
         ctx.pipeline().remove(this);
-        return msg;
     }
 
     enum State {

@@ -18,13 +18,14 @@ package io.netty.channel.udt;
 import io.netty.channel.ServerChannel;
 import io.netty.channel.udt.nio.NioUdtProvider;
 
-import java.net.InetSocketAddress;
-
 /**
  * UDT {@link ServerChannel}.
  * <p>
  * Supported UDT {@link UdtServerChannel} are available via {@link NioUdtProvider}.
+ *
+ * @deprecated The UDT transport is no longer maintained and will be removed.
  */
+@Deprecated
 public interface UdtServerChannel extends ServerChannel, UdtChannel {
 
 }

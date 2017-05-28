@@ -20,6 +20,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -28,8 +29,22 @@ import java.util.Map.Entry;
 public class QueryStringDecoderTest {
 
     @Test
+    public void testBasicUris() throws URISyntaxException {
+        QueryStringDecoder d = new QueryStringDecoder(new URI("http://localhost/path"));
+        Assert.assertEquals(0, d.parameters().size());
+    }
+
+    @Test
     public void testBasic() throws Exception {
         QueryStringDecoder d;
+
+        d = new QueryStringDecoder("/foo");
+        Assert.assertEquals("/foo", d.path());
+        Assert.assertEquals(0, d.parameters().size());
+
+        d = new QueryStringDecoder("/foo%20bar");
+        Assert.assertEquals("/foo bar", d.path());
+        Assert.assertEquals(0, d.parameters().size());
 
         d = new QueryStringDecoder("/foo?a=b=c");
         Assert.assertEquals("/foo", d.path());
@@ -39,6 +54,13 @@ public class QueryStringDecoderTest {
 
         d = new QueryStringDecoder("/foo?a=1&a=2");
         Assert.assertEquals("/foo", d.path());
+        Assert.assertEquals(1, d.parameters().size());
+        Assert.assertEquals(2, d.parameters().get("a").size());
+        Assert.assertEquals("1", d.parameters().get("a").get(0));
+        Assert.assertEquals("2", d.parameters().get("a").get(1));
+
+        d = new QueryStringDecoder("/foo%20bar?a=1&a=2");
+        Assert.assertEquals("/foo bar", d.path());
         Assert.assertEquals(1, d.parameters().size());
         Assert.assertEquals(2, d.parameters().get("a").size());
         Assert.assertEquals("1", d.parameters().get("a").get(0));
@@ -78,6 +100,8 @@ public class QueryStringDecoderTest {
     public void testExotic() throws Exception {
         assertQueryString("", "");
         assertQueryString("foo", "foo");
+        assertQueryString("foo", "foo?");
+        assertQueryString("/foo", "/foo?");
         assertQueryString("/foo", "/foo");
         assertQueryString("?a=", "?a");
         assertQueryString("foo?a=", "foo?a");
@@ -184,7 +208,6 @@ public class QueryStringDecoderTest {
         Assert.assertEquals(1, entry.getValue().size());
         Assert.assertEquals("value1", entry.getValue().get(0));
 
-
         entry = entries.next();
         Assert.assertEquals("param2", entry.getKey());
         Assert.assertEquals(1, entry.getValue().size());
@@ -212,7 +235,6 @@ public class QueryStringDecoderTest {
         Assert.assertEquals("param1", entry.getKey());
         Assert.assertEquals(1, entry.getValue().size());
         Assert.assertEquals("value1", entry.getValue().get(0));
-
 
         entry = entries.next();
         Assert.assertEquals("param2", entry.getKey());
@@ -242,7 +264,6 @@ public class QueryStringDecoderTest {
         Assert.assertEquals(1, entry.getValue().size());
         Assert.assertEquals("value1", entry.getValue().get(0));
 
-
         entry = entries.next();
         Assert.assertEquals("param2", entry.getKey());
         Assert.assertEquals(1, entry.getValue().size());
@@ -252,6 +273,29 @@ public class QueryStringDecoderTest {
         Assert.assertEquals("param3", entry.getKey());
         Assert.assertEquals(1, entry.getValue().size());
         Assert.assertEquals("value3", entry.getValue().get(0));
+
+        Assert.assertFalse(entries.hasNext());
+    }
+
+    // See https://github.com/netty/netty/issues/1833
+    @Test
+    public void testURI2() {
+        URI uri = URI.create("http://foo.com/images;num=10?query=name;value=123");
+        QueryStringDecoder decoder = new QueryStringDecoder(uri);
+        Assert.assertEquals("/images;num=10", decoder.path());
+        Map<String, List<String>> params =  decoder.parameters();
+        Assert.assertEquals(2, params.size());
+        Iterator<Entry<String, List<String>>> entries = params.entrySet().iterator();
+
+        Entry<String, List<String>> entry = entries.next();
+        Assert.assertEquals("query", entry.getKey());
+        Assert.assertEquals(1, entry.getValue().size());
+        Assert.assertEquals("name", entry.getValue().get(0));
+
+        entry = entries.next();
+        Assert.assertEquals("value", entry.getKey());
+        Assert.assertEquals(1, entry.getValue().size());
+        Assert.assertEquals("123", entry.getValue().get(0));
 
         Assert.assertFalse(entries.hasNext());
     }

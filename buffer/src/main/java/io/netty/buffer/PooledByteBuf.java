@@ -16,55 +16,63 @@
 
 package io.netty.buffer;
 
-import io.netty.util.ResourceLeak;
+import io.netty.util.Recycler;
+import io.netty.util.Recycler.Handle;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayDeque;
-import java.util.Queue;
 
-abstract class PooledByteBuf<T> extends AbstractByteBuf {
+abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
 
-    private final ResourceLeak leak = leakDetector.open(this);
+    private final Recycler.Handle<PooledByteBuf<T>> recyclerHandle;
 
     protected PoolChunk<T> chunk;
     protected long handle;
     protected T memory;
     protected int offset;
     protected int length;
-    private int maxLength;
-
+    int maxLength;
+    PoolThreadCache cache;
     private ByteBuffer tmpNioBuf;
-    private Queue<Allocation<T>> suspendedDeallocations;
+    private ByteBufAllocator allocator;
 
-    protected PooledByteBuf(int maxCapacity) {
+    @SuppressWarnings("unchecked")
+    protected PooledByteBuf(Recycler.Handle<? extends PooledByteBuf<T>> recyclerHandle, int maxCapacity) {
         super(maxCapacity);
+        this.recyclerHandle = (Handle<PooledByteBuf<T>>) recyclerHandle;
     }
 
-    void init(PoolChunk<T> chunk, long handle, int offset, int length, int maxLength) {
+    void init(PoolChunk<T> chunk, long handle, int offset, int length, int maxLength, PoolThreadCache cache) {
+        init0(chunk, handle, offset, length, maxLength, cache);
+    }
+
+    void initUnpooled(PoolChunk<T> chunk, int length) {
+        init0(chunk, 0, chunk.offset, length, length, null);
+    }
+
+    private void init0(PoolChunk<T> chunk, long handle, int offset, int length, int maxLength, PoolThreadCache cache) {
         assert handle >= 0;
         assert chunk != null;
 
         this.chunk = chunk;
-        this.handle = handle;
         memory = chunk.memory;
+        allocator = chunk.arena.parent;
+        this.cache = cache;
+        this.handle = handle;
         this.offset = offset;
         this.length = length;
         this.maxLength = maxLength;
-        setIndex(0, 0);
         tmpNioBuf = null;
     }
 
-    void initUnpooled(PoolChunk<T> chunk, int length) {
-        assert chunk != null;
-
-        this.chunk = chunk;
-        handle = 0;
-        memory = chunk.memory;
-        offset = 0;
-        this.length = maxLength = length;
-        setIndex(0, 0);
-        tmpNioBuf = null;
+    /**
+     * Method must be called before reuse this {@link PooledByteBufAllocator}
+     */
+    final void reuse(int maxCapacity) {
+        maxCapacity(maxCapacity);
+        setRefCnt(1);
+        setIndex0(0, 0);
+        discardMarks();
     }
 
     @Override
@@ -74,7 +82,7 @@ abstract class PooledByteBuf<T> extends AbstractByteBuf {
 
     @Override
     public final ByteBuf capacity(int newCapacity) {
-        checkUnfreed();
+        checkNewCapacity(newCapacity);
 
         // If the request capacity does not require reallocation, just update the length of the memory.
         if (chunk.unpooled) {
@@ -107,19 +115,13 @@ abstract class PooledByteBuf<T> extends AbstractByteBuf {
         }
 
         // Reallocation required.
-        if (suspendedDeallocations == null) {
-            chunk.arena.reallocate(this, newCapacity, true);
-        } else {
-            Allocation<T> old = new Allocation<T>(chunk, handle);
-            chunk.arena.reallocate(this, newCapacity, false);
-            suspendedDeallocations.add(old);
-        }
+        chunk.arena.reallocate(this, newCapacity, true);
         return this;
     }
 
     @Override
     public final ByteBufAllocator alloc() {
-        return chunk.arena.parent;
+        return allocator;
     }
 
     @Override
@@ -130,6 +132,22 @@ abstract class PooledByteBuf<T> extends AbstractByteBuf {
     @Override
     public final ByteBuf unwrap() {
         return null;
+    }
+
+    @Override
+    public final ByteBuf retainedDuplicate() {
+        return PooledDuplicatedByteBuf.newInstance(this, this, readerIndex(), writerIndex());
+    }
+
+    @Override
+    public final ByteBuf retainedSlice() {
+        final int index = readerIndex();
+        return retainedSlice(index, writerIndex() - index);
+    }
+
+    @Override
+    public final ByteBuf retainedSlice(int index, int length) {
+        return PooledSlicedByteBuf.newInstance(this, this, index, length);
     }
 
     protected final ByteBuffer internalNioBuffer() {
@@ -143,62 +161,23 @@ abstract class PooledByteBuf<T> extends AbstractByteBuf {
     protected abstract ByteBuffer newInternalNioBuffer(T memory);
 
     @Override
-    public final ByteBuf suspendIntermediaryDeallocations() {
-        checkUnfreed();
-        if (suspendedDeallocations == null) {
-            suspendedDeallocations = new ArrayDeque<Allocation<T>>(2);
-        }
-        return this;
-    }
-
-    @Override
-    public final ByteBuf resumeIntermediaryDeallocations() {
-        checkUnfreed();
-        if (suspendedDeallocations == null) {
-            return this;
-        }
-
-        Queue<Allocation<T>> suspendedDeallocations = this.suspendedDeallocations;
-        this.suspendedDeallocations = null;
-
-        if (suspendedDeallocations.isEmpty()) {
-            return this;
-        }
-
-        for (Allocation<T> a: suspendedDeallocations) {
-            a.chunk.arena.free(a.chunk, a.handle);
-        }
-        return this;
-    }
-
-    @Override
-    public final boolean isFreed() {
-        return memory == null;
-    }
-
-    @Override
-    public final void free() {
+    protected final void deallocate() {
         if (handle >= 0) {
-            resumeIntermediaryDeallocations();
             final long handle = this.handle;
             this.handle = -1;
             memory = null;
-            chunk.arena.free(chunk, handle);
-            leak.close();
+            tmpNioBuf = null;
+            chunk.arena.free(chunk, handle, maxLength, cache);
+            chunk = null;
+            recycle();
         }
+    }
+
+    private void recycle() {
+        recyclerHandle.recycle(this);
     }
 
     protected final int idx(int index) {
         return offset + index;
-    }
-
-    private static final class Allocation<T> {
-        final PoolChunk<T> chunk;
-        final long handle;
-
-        Allocation(PoolChunk<T> chunk, long handle) {
-            this.chunk = chunk;
-            this.handle = handle;
-        }
     }
 }

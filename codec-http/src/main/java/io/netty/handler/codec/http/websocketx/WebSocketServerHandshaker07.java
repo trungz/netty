@@ -15,24 +15,15 @@
  */
 package io.netty.handler.codec.http.websocketx;
 
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ChannelPromise;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.HttpHeaders.Names;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpRequestDecoder;
-import io.netty.handler.codec.http.HttpResponseEncoder;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaderValues;
+import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpResponseStatus;
-import io.netty.logging.InternalLogger;
-import io.netty.logging.InternalLoggerFactory;
 import io.netty.util.CharsetUtil;
 
-import static io.netty.handler.codec.http.HttpHeaders.Values.*;
 import static io.netty.handler.codec.http.HttpVersion.*;
 
 /**
@@ -44,11 +35,10 @@ import static io.netty.handler.codec.http.HttpVersion.*;
  */
 public class WebSocketServerHandshaker07 extends WebSocketServerHandshaker {
 
-    private static final InternalLogger logger = InternalLoggerFactory.getInstance(WebSocketServerHandshaker07.class);
-
     public static final String WEBSOCKET_07_ACCEPT_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
     private final boolean allowExtensions;
+    private final boolean allowMaskMismatch;
 
     /**
      * Constructor specifying the destination web socket location
@@ -66,8 +56,32 @@ public class WebSocketServerHandshaker07 extends WebSocketServerHandshaker {
      */
     public WebSocketServerHandshaker07(
             String webSocketURL, String subprotocols, boolean allowExtensions, int maxFramePayloadLength) {
+        this(webSocketURL, subprotocols, allowExtensions, maxFramePayloadLength, false);
+    }
+
+    /**
+     * Constructor specifying the destination web socket location
+     *
+     * @param webSocketURL
+     *            URL for web socket communications. e.g "ws://myhost.com/mypath".
+     *            Subsequent web socket frames will be sent to this URL.
+     * @param subprotocols
+     *            CSV of supported protocols
+     * @param allowExtensions
+     *            Allow extensions to be used in the reserved bits of the web socket frame
+     * @param maxFramePayloadLength
+     *            Maximum allowable frame payload length. Setting this value to your application's
+     *            requirement may reduce denial of service attacks using long data frames.
+     * @param allowMaskMismatch
+     *            When set to true, frames which are not masked properly according to the standard will still be
+     *            accepted.
+     */
+    public WebSocketServerHandshaker07(
+            String webSocketURL, String subprotocols, boolean allowExtensions, int maxFramePayloadLength,
+            boolean allowMaskMismatch) {
         super(WebSocketVersion.V07, webSocketURL, subprotocols, maxFramePayloadLength);
         this.allowExtensions = allowExtensions;
+        this.allowMaskMismatch = allowMaskMismatch;
     }
 
     /**
@@ -102,23 +116,18 @@ public class WebSocketServerHandshaker07 extends WebSocketServerHandshaker {
      * Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
      * Sec-WebSocket-Protocol: chat
      * </pre>
-     *
-     * @param channel
-     *            Channel
-     * @param req
-     *            HTTP request
      */
     @Override
-    public ChannelFuture handshake(Channel channel, FullHttpRequest req, ChannelPromise promise) {
-
-        if (logger.isDebugEnabled()) {
-            logger.debug(String.format("Channel %s WS Version 7 server handshake", channel.id()));
-        }
+    protected FullHttpResponse newHandshakeResponse(FullHttpRequest req, HttpHeaders headers) {
 
         FullHttpResponse res =
                 new DefaultFullHttpResponse(HTTP_1_1, HttpResponseStatus.SWITCHING_PROTOCOLS);
 
-        String key = req.headers().get(Names.SEC_WEBSOCKET_KEY);
+        if (headers != null) {
+            res.headers().add(headers);
+        }
+
+        CharSequence key = req.headers().get(HttpHeaderNames.SEC_WEBSOCKET_KEY);
         if (key == null) {
             throw new WebSocketHandshakeException("not a WebSocket request: missing key");
         }
@@ -127,54 +136,34 @@ public class WebSocketServerHandshaker07 extends WebSocketServerHandshaker {
         String accept = WebSocketUtil.base64(sha1);
 
         if (logger.isDebugEnabled()) {
-            logger.debug(String.format("WS Version 7 Server Handshake key: %s. Response: %s.", key, accept));
+            logger.debug("WebSocket version 07 server handshake key: {}, response: {}.", key, accept);
         }
 
-        res.headers().add(Names.UPGRADE, WEBSOCKET.toLowerCase());
-        res.headers().add(Names.CONNECTION, Names.UPGRADE);
-        res.headers().add(Names.SEC_WEBSOCKET_ACCEPT, accept);
-        String subprotocols = req.headers().get(Names.SEC_WEBSOCKET_PROTOCOL);
+        res.headers().add(HttpHeaderNames.UPGRADE, HttpHeaderValues.WEBSOCKET);
+        res.headers().add(HttpHeaderNames.CONNECTION, HttpHeaderValues.UPGRADE);
+        res.headers().add(HttpHeaderNames.SEC_WEBSOCKET_ACCEPT, accept);
+
+        String subprotocols = req.headers().get(HttpHeaderNames.SEC_WEBSOCKET_PROTOCOL);
         if (subprotocols != null) {
             String selectedSubprotocol = selectSubprotocol(subprotocols);
             if (selectedSubprotocol == null) {
-                throw new WebSocketHandshakeException("Requested subprotocol(s) not supported: " + subprotocols);
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Requested subprotocol(s) not supported: {}", subprotocols);
+                }
             } else {
-                res.headers().add(Names.SEC_WEBSOCKET_PROTOCOL, selectedSubprotocol);
-                setSelectedSubprotocol(selectedSubprotocol);
+                res.headers().add(HttpHeaderNames.SEC_WEBSOCKET_PROTOCOL, selectedSubprotocol);
             }
         }
-
-        channel.write(res, promise);
-
-        // Upgrade the connection and send the handshake response.
-        promise.addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture future) {
-                ChannelPipeline p = future.channel().pipeline();
-                if (p.get(HttpObjectAggregator.class) != null) {
-                    p.remove(HttpObjectAggregator.class);
-                }
-
-                p.replaceAndForward(HttpRequestDecoder.class, "wsdecoder",
-                        new WebSocket07FrameDecoder(true, allowExtensions, maxFramePayloadLength()));
-                p.replace(HttpResponseEncoder.class, "wsencoder", new WebSocket07FrameEncoder(false));
-            }
-        });
-
-        return promise;
+        return res;
     }
 
-    /**
-     * Echo back the closing frame and close the connection
-     *
-     * @param channel
-     *            Channel
-     * @param frame
-     *            Web Socket frame that was received
-     */
     @Override
-    public ChannelFuture close(Channel channel, CloseWebSocketFrame frame, ChannelPromise future) {
-        future.addListener(ChannelFutureListener.CLOSE);
-        return channel.write(frame, future);
+    protected WebSocketFrameDecoder newWebsocketDecoder() {
+        return new WebSocket07FrameDecoder(true, allowExtensions, maxFramePayloadLength(), allowMaskMismatch);
+    }
+
+    @Override
+    protected WebSocketFrameEncoder newWebSocketEncoder() {
+        return new WebSocket07FrameEncoder(false);
     }
 }

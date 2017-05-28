@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2013 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -20,9 +20,9 @@ import io.netty.util.internal.StringUtil;
 /**
  * The default {@link SpdyRstStreamFrame} implementation.
  */
-public class DefaultSpdyRstStreamFrame implements SpdyRstStreamFrame {
+public class DefaultSpdyRstStreamFrame extends DefaultSpdyStreamFrame
+        implements SpdyRstStreamFrame {
 
-    private int streamId;
     private SpdyStreamStatus status;
 
     /**
@@ -39,30 +39,27 @@ public class DefaultSpdyRstStreamFrame implements SpdyRstStreamFrame {
      * Creates a new instance.
      *
      * @param streamId the Stream-ID of this frame
-     * @param status   the getStatus of this frame
+     * @param status   the status of this frame
      */
     public DefaultSpdyRstStreamFrame(int streamId, SpdyStreamStatus status) {
-        setStreamId(streamId);
+        super(streamId);
         setStatus(status);
     }
 
     @Override
-    public int getStreamId() {
-        return streamId;
-    }
-
-    @Override
     public SpdyRstStreamFrame setStreamId(int streamId) {
-        if (streamId <= 0) {
-            throw new IllegalArgumentException(
-                    "Stream-ID must be positive: " + streamId);
-        }
-        this.streamId = streamId;
+        super.setStreamId(streamId);
         return this;
     }
 
     @Override
-    public SpdyStreamStatus getStatus() {
+    public SpdyRstStreamFrame setLast(boolean last) {
+        super.setLast(last);
+        return this;
+    }
+
+    @Override
+    public SpdyStreamStatus status() {
         return status;
     }
 
@@ -74,14 +71,14 @@ public class DefaultSpdyRstStreamFrame implements SpdyRstStreamFrame {
 
     @Override
     public String toString() {
-        StringBuilder buf = new StringBuilder();
-        buf.append(getClass().getSimpleName());
-        buf.append(StringUtil.NEWLINE);
-        buf.append("--> Stream-ID = ");
-        buf.append(streamId);
-        buf.append(StringUtil.NEWLINE);
-        buf.append("--> Status: ");
-        buf.append(status.toString());
-        return buf.toString();
+        return new StringBuilder()
+            .append(StringUtil.simpleClassName(this))
+            .append(StringUtil.NEWLINE)
+            .append("--> Stream-ID = ")
+            .append(streamId())
+            .append(StringUtil.NEWLINE)
+            .append("--> Status: ")
+            .append(status())
+            .toString();
     }
 }

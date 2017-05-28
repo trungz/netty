@@ -15,6 +15,8 @@
  */
 package io.netty.handler.codec.http;
 
+import io.netty.util.internal.ObjectUtil;
+
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -23,6 +25,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.UnsupportedCharsetException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * Creates an URL-encoded URI from a path string and key-value parameter pairs.
@@ -34,12 +37,10 @@ import java.util.List;
  * assert encoder.toString().equals("/hello?recipient=world");
  * </pre>
  * @see QueryStringDecoder
- *
- * @apiviz.stereotype utility
- * @apiviz.has        io.netty.handler.codec.http.FullHttpRequest oneway - - encodes
  */
 public class QueryStringEncoder {
 
+    private static final Pattern PATTERN = Pattern.compile("+", Pattern.LITERAL);
     private final Charset charset;
     private final String uri;
     private final List<Param> params = new ArrayList<Param>();
@@ -57,34 +58,22 @@ public class QueryStringEncoder {
      * path string in the specified charset.
      */
     public QueryStringEncoder(String uri, Charset charset) {
-        if (uri == null) {
-            throw new NullPointerException("getUri");
-        }
-        if (charset == null) {
-            throw new NullPointerException("charset");
-        }
-
-        this.uri = uri;
-        this.charset = charset;
+        this.uri = ObjectUtil.checkNotNull(uri, "uri");
+        this.charset = ObjectUtil.checkNotNull(charset, "charset");
     }
 
     /**
      * Adds a parameter with the specified name and value to this encoder.
      */
     public void addParam(String name, String value) {
-        if (name == null) {
-            throw new NullPointerException("name");
-        }
-        if (value == null) {
-            throw new NullPointerException("value");
-        }
+        ObjectUtil.checkNotNull(name, "name");
         params.add(new Param(name, value));
     }
 
     /**
      * Returns the URL-encoded URI object which was created from the path string
      * specified in the constructor and the parameters added by
-     * {@link #addParam(String, String)} getMethod.
+     * {@link #addParam(String, String)} method.
      */
     public URI toUri() throws URISyntaxException {
         return new URI(toString());
@@ -93,7 +82,7 @@ public class QueryStringEncoder {
     /**
      * Returns the URL-encoded URI which was created from the path string
      * specified in the constructor and the parameters added by
-     * {@link #addParam(String, String)} getMethod.
+     * {@link #addParam(String, String)} method.
      */
     @Override
     public String toString() {
@@ -104,8 +93,10 @@ public class QueryStringEncoder {
             for (int i = 0; i < params.size(); i++) {
                 Param param = params.get(i);
                 sb.append(encodeComponent(param.name, charset));
-                sb.append('=');
-                sb.append(encodeComponent(param.value, charset));
+                if (param.value != null) {
+                    sb.append('=');
+                    sb.append(encodeComponent(param.value, charset));
+                }
                 if (i != params.size() - 1) {
                     sb.append('&');
                 }
@@ -115,9 +106,10 @@ public class QueryStringEncoder {
     }
 
     private static String encodeComponent(String s, Charset charset) {
+        // TODO: Optimize me.
         try {
-            return URLEncoder.encode(s, charset.name()).replaceAll("\\+", "%20");
-        } catch (UnsupportedEncodingException e) {
+            return PATTERN.matcher(URLEncoder.encode(s, charset.name())).replaceAll("%20");
+        } catch (UnsupportedEncodingException ignored) {
             throw new UnsupportedCharsetException(charset.name());
         }
     }

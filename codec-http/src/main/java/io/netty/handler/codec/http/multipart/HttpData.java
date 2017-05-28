@@ -27,12 +27,32 @@ import java.nio.charset.Charset;
  * Extended interface for InterfaceHttpData
  */
 public interface HttpData extends InterfaceHttpData, ByteBufHolder {
+
+    /**
+     * Returns the maxSize for this HttpData.
+     */
+    long getMaxSize();
+
+    /**
+     * Set the maxSize for this HttpData. When limit will be reached, an exception will be raised.
+     * Setting it to (-1) means no limitation.
+     *
+     * By default, to be set from the HttpDataFactory.
+     */
+    void setMaxSize(long maxSize);
+
+    /**
+     * Check if the new size is not reaching the max limit allowed.
+     * The limit is always computed in term of bytes.
+     */
+    void checkSize(long newSize) throws IOException;
+
     /**
      * Set the content from the ChannelBuffer (erase any previous data)
      *
      * @param buffer
      *            must be not null
-     * @exception IOException
+     * @throws IOException
      */
     void setContent(ByteBuf buffer) throws IOException;
 
@@ -43,7 +63,7 @@ public interface HttpData extends InterfaceHttpData, ByteBufHolder {
      *            must be not null except if last is set to False
      * @param last
      *            True of the buffer is the last one
-     * @exception IOException
+     * @throws IOException
      */
     void addContent(ByteBuf buffer, boolean last) throws IOException;
 
@@ -52,7 +72,7 @@ public interface HttpData extends InterfaceHttpData, ByteBufHolder {
      *
      * @param file
      *            must be not null
-     * @exception IOException
+     * @throws IOException
      */
     void setContent(File file) throws IOException;
 
@@ -61,7 +81,7 @@ public interface HttpData extends InterfaceHttpData, ByteBufHolder {
      *
      * @param inputStream
      *            must be not null
-     * @exception IOException
+     * @throws IOException
      */
     void setContent(InputStream inputStream) throws IOException;
 
@@ -79,6 +99,22 @@ public interface HttpData extends InterfaceHttpData, ByteBufHolder {
     long length();
 
     /**
+     * Returns the defined length of the HttpData.
+     *
+     * If no Content-Length is provided in the request, the defined length is
+     * always 0 (whatever during decoding or in final state).
+     *
+     * If Content-Length is provided in the request, this is this given defined length.
+     * This value does not change, whatever during decoding or in the final state.
+     *
+     * This method could be used for instance to know the amount of bytes transmitted for
+     * one particular HttpData, for example one {@link FileUpload} or any known big {@link Attribute}.
+     *
+     * @return the defined length of the HttpData
+     */
+    long definedLength();
+
+    /**
      * Deletes the underlying storage for a file item, including deleting any
      * associated temporary disk file.
      */
@@ -88,7 +124,7 @@ public interface HttpData extends InterfaceHttpData, ByteBufHolder {
      * Returns the contents of the file item as an array of bytes.
      *
      * @return the contents of the file item as an array of bytes.
-     * @exception IOException
+     * @throws IOException
      */
     byte[] get() throws IOException;
 
@@ -117,7 +153,7 @@ public interface HttpData extends InterfaceHttpData, ByteBufHolder {
      *
      * @return the contents of the file item as a String, using the default
      *         character encoding.
-     * @exception IOException
+     * @throws IOException
      */
     String getString() throws IOException;
 
@@ -129,7 +165,7 @@ public interface HttpData extends InterfaceHttpData, ByteBufHolder {
      *            the charset to use
      * @return the contents of the file item as a String, using the specified
      *         charset.
-     * @exception IOException
+     * @throws IOException
      */
     String getString(Charset encoding) throws IOException;
 
@@ -157,7 +193,7 @@ public interface HttpData extends InterfaceHttpData, ByteBufHolder {
      * @param dest
      *            destination file - must be not null
      * @return True if the write is successful
-     * @exception IOException
+     * @throws IOException
      */
     boolean renameTo(File dest) throws IOException;
 
@@ -179,4 +215,25 @@ public interface HttpData extends InterfaceHttpData, ByteBufHolder {
 
     @Override
     HttpData copy();
+
+    @Override
+    HttpData duplicate();
+
+    @Override
+    HttpData retainedDuplicate();
+
+    @Override
+    HttpData replace(ByteBuf content);
+
+    @Override
+    HttpData retain();
+
+    @Override
+    HttpData retain(int increment);
+
+    @Override
+    HttpData touch();
+
+    @Override
+    HttpData touch(Object hint);
 }

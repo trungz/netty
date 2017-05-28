@@ -19,35 +19,32 @@ package io.netty.test.udt.nio;
 import com.yammer.metrics.Metrics;
 import com.yammer.metrics.core.Meter;
 import io.netty.bootstrap.Bootstrap;
-import io.netty.buffer.BufType;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.udt.nio.NioUdtByteRendezvousChannel;
-import io.netty.test.udt.util.BootHelp;
+import io.netty.channel.udt.nio.NioUdtProvider;
 import io.netty.test.udt.util.EchoByteHandler;
 import io.netty.test.udt.util.UnitHelp;
-
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 import org.junit.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.*;
 
 public class NioUdtByteRendezvousChannelTest extends AbstractUdtTest {
 
-    protected static final Logger log = LoggerFactory.getLogger(NioUdtByteAcceptorChannelTest.class);
+    private static final InternalLogger log = InternalLoggerFactory.getInstance(NioUdtByteAcceptorChannelTest.class);
 
     /**
      * verify channel meta data
      */
     @Test
     public void metadata() throws Exception {
-
-        assertEquals(BufType.BYTE, new NioUdtByteRendezvousChannel().metadata()
-                .bufferType());
-
+        assertFalse(new NioUdtByteRendezvousChannel().metadata().hasDisconnect());
     }
 
     /**
@@ -73,8 +70,24 @@ public class NioUdtByteRendezvousChannelTest extends AbstractUdtTest {
         final EchoByteHandler handler1 = new EchoByteHandler(rate1, messageSize);
         final EchoByteHandler handler2 = new EchoByteHandler(rate2, messageSize);
 
-        final Bootstrap boot1 = BootHelp.bytePeerBoot(addr1, addr2, handler1);
-        final Bootstrap boot2 = BootHelp.bytePeerBoot(addr2, addr1, handler2);
+        final NioEventLoopGroup group1 = new NioEventLoopGroup(
+                1, Executors.defaultThreadFactory(), NioUdtProvider.BYTE_PROVIDER);
+        final NioEventLoopGroup group2 = new NioEventLoopGroup(
+                1, Executors.defaultThreadFactory(), NioUdtProvider.BYTE_PROVIDER);
+
+        final Bootstrap boot1 = new Bootstrap();
+        boot1.group(group1)
+             .channelFactory(NioUdtProvider.BYTE_RENDEZVOUS)
+             .localAddress(addr1)
+             .remoteAddress(addr2)
+             .handler(handler1);
+
+        final Bootstrap boot2 = new Bootstrap();
+        boot2.group(group1)
+             .channelFactory(NioUdtProvider.BYTE_RENDEZVOUS)
+             .localAddress(addr2)
+             .remoteAddress(addr1)
+             .handler(handler2);
 
         final ChannelFuture connectFuture1 = boot1.connect();
         final ChannelFuture connectFuture2 = boot2.connect();
@@ -82,27 +95,27 @@ public class NioUdtByteRendezvousChannelTest extends AbstractUdtTest {
         while (handler1.meter().count() < transferLimit
                 && handler2.meter().count() < transferLimit) {
 
-            NioUdtByteAcceptorChannelTest.log.info("progress : {} {}", handler1.meter().count(), handler2
+            log.info("progress : {} {}", handler1.meter().count(), handler2
                     .meter().count());
 
             Thread.sleep(1000);
-
         }
 
         connectFuture1.channel().close().sync();
         connectFuture2.channel().close().sync();
 
-        NioUdtByteAcceptorChannelTest.log.info("handler1 : {}", handler1.meter().count());
-        NioUdtByteAcceptorChannelTest.log.info("handler2 : {}", handler2.meter().count());
+        log.info("handler1 : {}", handler1.meter().count());
+        log.info("handler2 : {}", handler2.meter().count());
 
         assertTrue(handler1.meter().count() >= transferLimit);
         assertTrue(handler2.meter().count() >= transferLimit);
 
         assertEquals(handler1.meter().count(), handler2.meter().count());
 
-        boot1.shutdown();
-        boot2.shutdown();
+        group1.shutdownGracefully();
+        group2.shutdownGracefully();
 
+        group1.terminationFuture().sync();
+        group2.terminationFuture().sync();
     }
-
 }

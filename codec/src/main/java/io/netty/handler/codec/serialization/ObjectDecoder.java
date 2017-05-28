@@ -20,6 +20,7 @@ import io.netty.buffer.ByteBufInputStream;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 
+import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.StreamCorruptedException;
 
@@ -31,8 +32,6 @@ import java.io.StreamCorruptedException;
  * compatible with the standard {@link ObjectOutputStream}.  Please use
  * {@link ObjectEncoder} or {@link ObjectEncoderOutputStream} to ensure the
  * interoperability with this decoder.
- * @apiviz.landmark
- * @apiviz.has io.netty.handler.codec.serialization.ObjectDecoderInputStream - - - compatible with
  */
 public class ObjectDecoder extends LengthFieldBasedFrameDecoder {
 
@@ -72,12 +71,11 @@ public class ObjectDecoder extends LengthFieldBasedFrameDecoder {
             return null;
         }
 
-        return new CompactObjectInputStream(
-                new ByteBufInputStream(frame), classResolver).readObject();
-    }
-
-    @Override
-    protected ByteBuf extractFrame(ByteBuf buffer, int index, int length) {
-        return buffer.slice(index, length);
+        ObjectInputStream ois = new CompactObjectInputStream(new ByteBufInputStream(frame, true), classResolver);
+        try {
+            return ois.readObject();
+        } finally {
+            ois.close();
+        }
     }
 }

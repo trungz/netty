@@ -17,15 +17,15 @@ package io.netty.channel.local;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
-import io.netty.buffer.MessageBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandler.Sharable;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundMessageHandlerAdapter;
+import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.DefaultEventLoopGroup;
+import io.netty.util.ReferenceCountUtil;
 import org.junit.Test;
 
-import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.*;
@@ -39,16 +39,16 @@ public class LocalTransportThreadModelTest2 {
     @Test(timeout = 15000)
     public void testSocketReuse() throws InterruptedException {
         ServerBootstrap serverBootstrap = new ServerBootstrap();
-        LocalHander serverHandler = new LocalHander("SERVER");
+        LocalHandler serverHandler = new LocalHandler("SERVER");
         serverBootstrap
-                .group(new LocalEventLoopGroup(), new LocalEventLoopGroup())
+                .group(new DefaultEventLoopGroup(), new DefaultEventLoopGroup())
                 .channel(LocalServerChannel.class)
                 .childHandler(serverHandler);
 
         Bootstrap clientBootstrap = new Bootstrap();
-        LocalHander clientHandler = new LocalHander("CLIENT");
+        LocalHandler clientHandler = new LocalHandler("CLIENT");
         clientBootstrap
-                .group(new LocalEventLoopGroup())
+                .group(new DefaultEventLoopGroup())
                 .channel(LocalChannel.class)
                 .remoteAddress(new LocalAddress(LOCAL_CHANNEL)).handler(clientHandler);
 
@@ -70,31 +70,12 @@ public class LocalTransportThreadModelTest2 {
                 clientHandler.count.get());
     }
 
-    public void close(final Channel localChannel, final LocalHander localRegistrationHandler) {
+    public void close(final Channel localChannel, final LocalHandler localRegistrationHandler) {
         // we want to make sure we actually shutdown IN the event loop
         if (localChannel.eventLoop().inEventLoop()) {
-            MessageBuf<Object> outboundMessageBuffer =
-                    localChannel.pipeline().outboundMessageBuffer();
-            if (!outboundMessageBuffer.isEmpty()) {
-                System.err.println("NOT EMPTY TO SEND!");
-            }
-
             // Wait until all messages are flushed before closing the channel.
             if (localRegistrationHandler.lastWriteFuture != null) {
                 localRegistrationHandler.lastWriteFuture.awaitUninterruptibly();
-            }
-
-            MessageBuf<Object> inboundMessageBuffer =
-                    localChannel.pipeline().inboundMessageBuffer();
-            if (!inboundMessageBuffer.isEmpty()) {
-                // sometimes we close the pipeline before everything on it has been notified/received.
-                // we want these messages, since they are in our queue.
-                Iterator<Object> iterator = inboundMessageBuffer.iterator();
-                while (iterator.hasNext()) {
-                    Object next = iterator.next();
-                    System.err.println("DEFERRED on close: " + next);
-                    iterator.remove();
-                }
             }
 
             localChannel.close();
@@ -110,20 +91,18 @@ public class LocalTransportThreadModelTest2 {
 
         // Wait until the connection is closed or the connection attempt fails.
         localChannel.closeFuture().awaitUninterruptibly();
-
     }
 
     @Sharable
-    static class LocalHander extends ChannelInboundMessageHandlerAdapter<Object> {
+    static class LocalHandler extends ChannelInboundHandlerAdapter {
         private final String name;
 
         public volatile ChannelFuture lastWriteFuture;
 
         public final AtomicInteger count = new AtomicInteger(0);
 
-        public LocalHander(String name) {
+        LocalHandler(String name) {
             this.name = name;
-
         }
 
         @Override
@@ -131,11 +110,13 @@ public class LocalTransportThreadModelTest2 {
             for (int i = 0; i < messageCountPerRun; i ++) {
                 lastWriteFuture = ctx.channel().write(name + ' ' + i);
             }
+            ctx.channel().flush();
         }
 
         @Override
-        public void messageReceived(ChannelHandlerContext ctx, Object msg) throws Exception {
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
             count.incrementAndGet();
+            ReferenceCountUtil.release(msg);
         }
     }
 }

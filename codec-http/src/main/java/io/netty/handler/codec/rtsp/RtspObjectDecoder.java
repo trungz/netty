@@ -47,13 +47,15 @@ import io.netty.handler.codec.http.HttpObjectDecoder;
  *     value, a {@link TooLongFrameException} will be raised.</td>
  * </tr>
  * </table>
- * @apiviz.landmark
+ *
+ * @deprecated Use {@link RtspDecoder} instead.
  */
+@Deprecated
 public abstract class RtspObjectDecoder extends HttpObjectDecoder {
 
     /**
      * Creates a new instance with the default
-     * {@code maxInitialLineLength (4096}}, {@code maxHeaderSize (8192)}, and
+     * {@code maxInitialLineLength (4096)}, {@code maxHeaderSize (8192)}, and
      * {@code maxContentLength (8192)}.
      */
     protected RtspObjectDecoder() {
@@ -67,6 +69,11 @@ public abstract class RtspObjectDecoder extends HttpObjectDecoder {
         super(maxInitialLineLength, maxHeaderSize, maxContentLength * 2, false);
     }
 
+    protected RtspObjectDecoder(
+            int maxInitialLineLength, int maxHeaderSize, int maxContentLength, boolean validateHeaders) {
+        super(maxInitialLineLength, maxHeaderSize, maxContentLength * 2, false, validateHeaders);
+    }
+
     @Override
     protected boolean isContentAlwaysEmpty(HttpMessage msg) {
         // Unlike HTTP, RTSP always assumes zero-length body if Content-Length
@@ -75,7 +82,7 @@ public abstract class RtspObjectDecoder extends HttpObjectDecoder {
         if (empty) {
             return true;
         }
-        if (!msg.headers().contains(RtspHeaders.Names.CONTENT_LENGTH)) {
+        if (!msg.headers().contains(RtspHeaderNames.CONTENT_LENGTH)) {
             return true;
         }
         return empty;

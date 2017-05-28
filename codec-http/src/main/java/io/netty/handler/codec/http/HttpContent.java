@@ -15,6 +15,7 @@
  */
 package io.netty.handler.codec.http;
 
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufHolder;
 import io.netty.channel.ChannelPipeline;
 
@@ -25,9 +26,29 @@ import io.netty.channel.ChannelPipeline;
  * is 'chunked.  If you prefer not to receive {@link HttpContent} in your handler,
  * place {@link HttpObjectAggregator} after {@link HttpObjectDecoder} in the
  * {@link ChannelPipeline}.
- * @apiviz.landmark
  */
 public interface HttpContent extends HttpObject, ByteBufHolder {
     @Override
     HttpContent copy();
+
+    @Override
+    HttpContent duplicate();
+
+    @Override
+    HttpContent retainedDuplicate();
+
+    @Override
+    HttpContent replace(ByteBuf content);
+
+    @Override
+    HttpContent retain();
+
+    @Override
+    HttpContent retain(int increment);
+
+    @Override
+    HttpContent touch();
+
+    @Override
+    HttpContent touch(Object hint);
 }

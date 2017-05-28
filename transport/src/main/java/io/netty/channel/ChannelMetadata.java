@@ -15,8 +15,6 @@
  */
 package io.netty.channel;
 
-import io.netty.buffer.BufType;
-
 import java.net.SocketAddress;
 
 /**
@@ -24,31 +22,36 @@ import java.net.SocketAddress;
  */
 public final class ChannelMetadata {
 
-    private final BufType bufferType;
     private final boolean hasDisconnect;
+    private final int defaultMaxMessagesPerRead;
 
     /**
      * Create a new instance
      *
-     * @param bufferType        the {@link BufType} which will be used by the {@link Channel}.
      * @param hasDisconnect     {@code true} if and only if the channel has the {@code disconnect()} operation
      *                          that allows a user to disconnect and then call {@link Channel#connect(SocketAddress)}
-     *                                      again, such as UDP/IP.
+     *                          again, such as UDP/IP.
      */
-    public ChannelMetadata(BufType bufferType, boolean hasDisconnect) {
-        if (bufferType == null) {
-            throw new NullPointerException("bufferType");
-        }
-
-        this.bufferType = bufferType;
-        this.hasDisconnect = hasDisconnect;
+    public ChannelMetadata(boolean hasDisconnect) {
+        this(hasDisconnect, 1);
     }
 
     /**
-     * Returns the {@link BufType} which will be used by the {@link Channel}.
+     * Create a new instance
+     *
+     * @param hasDisconnect     {@code true} if and only if the channel has the {@code disconnect()} operation
+     *                          that allows a user to disconnect and then call {@link Channel#connect(SocketAddress)}
+     *                          again, such as UDP/IP.
+     * @param defaultMaxMessagesPerRead If a {@link MaxMessagesRecvByteBufAllocator} is in use, then this value will be
+     * set for {@link MaxMessagesRecvByteBufAllocator#maxMessagesPerRead()}. Must be {@code > 0}.
      */
-    public BufType bufferType() {
-        return bufferType;
+    public ChannelMetadata(boolean hasDisconnect, int defaultMaxMessagesPerRead) {
+        if (defaultMaxMessagesPerRead <= 0) {
+            throw new IllegalArgumentException("defaultMaxMessagesPerRead: " + defaultMaxMessagesPerRead +
+                                               " (expected > 0)");
+        }
+        this.hasDisconnect = hasDisconnect;
+        this.defaultMaxMessagesPerRead = defaultMaxMessagesPerRead;
     }
 
     /**
@@ -58,5 +61,13 @@ public final class ChannelMetadata {
      */
     public boolean hasDisconnect() {
         return hasDisconnect;
+    }
+
+    /**
+     * If a {@link MaxMessagesRecvByteBufAllocator} is in use, then this is the default value for
+     * {@link MaxMessagesRecvByteBufAllocator#maxMessagesPerRead()}.
+     */
+    public int defaultMaxMessagesPerRead() {
+        return defaultMaxMessagesPerRead;
     }
 }

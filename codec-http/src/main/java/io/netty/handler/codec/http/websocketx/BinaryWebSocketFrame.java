@@ -56,6 +56,45 @@ public class BinaryWebSocketFrame extends WebSocketFrame {
 
     @Override
     public BinaryWebSocketFrame copy() {
-        return new BinaryWebSocketFrame(isFinalFragment(), rsv(), data().copy());
+        return (BinaryWebSocketFrame) super.copy();
+    }
+
+    @Override
+    public BinaryWebSocketFrame duplicate() {
+        return (BinaryWebSocketFrame) super.duplicate();
+    }
+
+    @Override
+    public BinaryWebSocketFrame retainedDuplicate() {
+        return (BinaryWebSocketFrame) super.retainedDuplicate();
+    }
+
+    @Override
+    public BinaryWebSocketFrame replace(ByteBuf content) {
+        return new BinaryWebSocketFrame(isFinalFragment(), rsv(), content);
+    }
+
+    @Override
+    public BinaryWebSocketFrame retain() {
+        super.retain();
+        return this;
+    }
+
+    @Override
+    public BinaryWebSocketFrame retain(int increment) {
+        super.retain(increment);
+        return this;
+    }
+
+    @Override
+    public BinaryWebSocketFrame touch() {
+        super.touch();
+        return this;
+    }
+
+    @Override
+    public BinaryWebSocketFrame touch(Object hint) {
+        super.touch(hint);
+        return this;
     }
 }

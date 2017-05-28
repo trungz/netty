@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2013 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -20,62 +20,74 @@ import io.netty.util.internal.StringUtil;
 /**
  * The default {@link SpdySynStreamFrame} implementation.
  */
-public class DefaultSpdySynStreamFrame extends DefaultSpdyHeaderBlock
+public class DefaultSpdySynStreamFrame extends DefaultSpdyHeadersFrame
         implements SpdySynStreamFrame {
 
-    private int streamId;
-    private int associatedToStreamId;
+    private int associatedStreamId;
     private byte priority;
-    private boolean last;
     private boolean unidirectional;
 
     /**
      * Creates a new instance.
      *
-     * @param streamId             the Stream-ID of this frame
-     * @param associatedToStreamId the Associated-To-Stream-ID of this frame
-     * @param priority             the priority of the stream
+     * @param streamId           the Stream-ID of this frame
+     * @param associatedStreamId the Associated-To-Stream-ID of this frame
+     * @param priority           the priority of the stream
      */
-    public DefaultSpdySynStreamFrame(
-            int streamId, int associatedToStreamId, byte priority) {
-        setStreamId(streamId);
-        setAssociatedToStreamId(associatedToStreamId);
+    public DefaultSpdySynStreamFrame(int streamId, int associatedStreamId, byte priority) {
+        this(streamId, associatedStreamId, priority, true);
+    }
+
+    /**
+     * Creates a new instance.
+     *
+     * @param streamId           the Stream-ID of this frame
+     * @param associatedStreamId the Associated-To-Stream-ID of this frame
+     * @param priority           the priority of the stream
+     * @param validateHeaders    validate the header names and values when adding them to the {@link SpdyHeaders}
+     */
+    public DefaultSpdySynStreamFrame(int streamId, int associatedStreamId, byte priority, boolean validateHeaders) {
+        super(streamId, validateHeaders);
+        setAssociatedStreamId(associatedStreamId);
         setPriority(priority);
     }
 
     @Override
-    public int getStreamId() {
-        return streamId;
-    }
-
-    @Override
     public SpdySynStreamFrame setStreamId(int streamId) {
-        if (streamId <= 0) {
-            throw new IllegalArgumentException(
-                    "Stream-ID must be positive: " + streamId);
-        }
-        this.streamId = streamId;
+        super.setStreamId(streamId);
         return this;
     }
 
     @Override
-    public int getAssociatedToStreamId() {
-        return associatedToStreamId;
+    public SpdySynStreamFrame setLast(boolean last) {
+        super.setLast(last);
+        return this;
     }
 
     @Override
-    public SpdySynStreamFrame setAssociatedToStreamId(int associatedToStreamId) {
-        if (associatedToStreamId < 0) {
+    public SpdySynStreamFrame setInvalid() {
+        super.setInvalid();
+        return this;
+    }
+
+    @Override
+    public int associatedStreamId() {
+        return associatedStreamId;
+    }
+
+    @Override
+    public SpdySynStreamFrame setAssociatedStreamId(int associatedStreamId) {
+        if (associatedStreamId < 0) {
             throw new IllegalArgumentException(
                     "Associated-To-Stream-ID cannot be negative: " +
-                    associatedToStreamId);
+                    associatedStreamId);
         }
-        this.associatedToStreamId = associatedToStreamId;
+        this.associatedStreamId = associatedStreamId;
         return this;
     }
 
     @Override
-    public byte getPriority() {
+    public byte priority() {
         return priority;
     }
 
@@ -86,17 +98,6 @@ public class DefaultSpdySynStreamFrame extends DefaultSpdyHeaderBlock
                     "Priority must be between 0 and 7 inclusive: " + priority);
         }
         this.priority = priority;
-        return this;
-    }
-
-    @Override
-    public boolean isLast() {
-        return last;
-    }
-
-    @Override
-    public SpdySynStreamFrame setLast(boolean last) {
-        this.last = last;
         return this;
     }
 
@@ -112,34 +113,28 @@ public class DefaultSpdySynStreamFrame extends DefaultSpdyHeaderBlock
     }
 
     @Override
-    public SpdySynStreamFrame setInvalid() {
-        super.setInvalid();
-        return this;
-    }
-
-    @Override
     public String toString() {
-        StringBuilder buf = new StringBuilder();
-        buf.append(getClass().getSimpleName());
-        buf.append("(last: ");
-        buf.append(isLast());
-        buf.append("; unidirectional: ");
-        buf.append(isUnidirectional());
-        buf.append(')');
-        buf.append(StringUtil.NEWLINE);
-        buf.append("--> Stream-ID = ");
-        buf.append(streamId);
-        buf.append(StringUtil.NEWLINE);
-        if (associatedToStreamId != 0) {
-            buf.append("--> Associated-To-Stream-ID = ");
-            buf.append(associatedToStreamId);
-            buf.append(StringUtil.NEWLINE);
+        StringBuilder buf = new StringBuilder()
+            .append(StringUtil.simpleClassName(this))
+            .append("(last: ")
+            .append(isLast())
+            .append("; unidirectional: ")
+            .append(isUnidirectional())
+            .append(')')
+            .append(StringUtil.NEWLINE)
+            .append("--> Stream-ID = ")
+            .append(streamId())
+            .append(StringUtil.NEWLINE);
+        if (associatedStreamId != 0) {
+            buf.append("--> Associated-To-Stream-ID = ")
+               .append(associatedStreamId())
+               .append(StringUtil.NEWLINE);
         }
-        buf.append("--> Priority = ");
-        buf.append(priority);
-        buf.append(StringUtil.NEWLINE);
-        buf.append("--> Headers:");
-        buf.append(StringUtil.NEWLINE);
+        buf.append("--> Priority = ")
+           .append(priority())
+           .append(StringUtil.NEWLINE)
+           .append("--> Headers:")
+           .append(StringUtil.NEWLINE);
         appendHeaders(buf);
 
         // Remove the last newline.

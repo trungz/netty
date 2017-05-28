@@ -16,41 +16,41 @@
 package io.netty.example.securechat;
 
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.example.telnet.TelnetServer;
+import io.netty.handler.logging.LogLevel;
+import io.netty.handler.logging.LoggingHandler;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.SelfSignedCertificate;
 
 /**
  * Simple SSL chat server modified from {@link TelnetServer}.
  */
-public class SecureChatServer {
+public final class SecureChatServer {
 
-    private final int port;
-
-    public SecureChatServer(int port) {
-        this.port = port;
-    }
-
-    public void run() throws InterruptedException {
-        ServerBootstrap b = new ServerBootstrap();
-        try {
-            b.group(new NioEventLoopGroup(), new NioEventLoopGroup())
-             .channel(NioServerSocketChannel.class)
-             .childHandler(new SecureChatServerInitializer());
-
-            b.bind(port).sync().channel().closeFuture().sync();
-        } finally {
-            b.shutdown();
-        }
-    }
+    static final int PORT = Integer.parseInt(System.getProperty("port", "8992"));
 
     public static void main(String[] args) throws Exception {
-        int port;
-        if (args.length > 0) {
-            port = Integer.parseInt(args[0]);
-        } else {
-            port = 8443;
+        SelfSignedCertificate ssc = new SelfSignedCertificate();
+        SslContext sslCtx = SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey())
+            .build();
+
+        EventLoopGroup bossGroup = new NioEventLoopGroup(1);
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        try {
+            ServerBootstrap b = new ServerBootstrap();
+            b.group(bossGroup, workerGroup)
+             .channel(NioServerSocketChannel.class)
+             .handler(new LoggingHandler(LogLevel.INFO))
+             .childHandler(new SecureChatServerInitializer(sslCtx));
+
+            b.bind(PORT).sync().channel().closeFuture().sync();
+        } finally {
+            bossGroup.shutdownGracefully();
+            workerGroup.shutdownGracefully();
         }
-        new SecureChatServer(port).run();
     }
 }

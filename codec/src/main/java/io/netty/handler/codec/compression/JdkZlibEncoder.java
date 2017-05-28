@@ -16,34 +16,30 @@
 package io.netty.handler.codec.compression;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
+import io.netty.channel.ChannelPromiseNotifier;
+import io.netty.util.concurrent.EventExecutor;
 
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 
-
 /**
  * Compresses a {@link ByteBuf} using the deflate algorithm.
- * @apiviz.landmark
- * @apiviz.has org.jboss.netty.handler.codec.compression.ZlibWrapper
  */
 public class JdkZlibEncoder extends ZlibEncoder {
 
-    private final byte[] encodeBuf = new byte[8192];
+    private final ZlibWrapper wrapper;
     private final Deflater deflater;
-    private final AtomicBoolean finished = new AtomicBoolean();
+    private volatile boolean finished;
     private volatile ChannelHandlerContext ctx;
 
     /*
      * GZIP support
      */
-    private final boolean gzip;
     private final CRC32 crc = new CRC32();
     private static final byte[] gzipHeader = {0x1f, (byte) 0x8b, Deflater.DEFLATED, 0, 0, 0, 0, 0, 0, 0};
     private boolean writeHeader = true;
@@ -108,7 +104,7 @@ public class JdkZlibEncoder extends ZlibEncoder {
                     "allowed for compression.");
         }
 
-        gzip = wrapper == ZlibWrapper.GZIP;
+        this.wrapper = wrapper;
         deflater = new Deflater(compressionLevel, wrapper != ZlibWrapper.ZLIB);
     }
 
@@ -149,7 +145,7 @@ public class JdkZlibEncoder extends ZlibEncoder {
             throw new NullPointerException("dictionary");
         }
 
-        gzip = false;
+        wrapper = ZlibWrapper.ZLIB;
         deflater = new Deflater(compressionLevel);
         deflater.setDictionary(dictionary);
     }
@@ -160,8 +156,22 @@ public class JdkZlibEncoder extends ZlibEncoder {
     }
 
     @Override
-    public ChannelFuture close(ChannelPromise future) {
-        return finishEncode(ctx(), future);
+    public ChannelFuture close(final ChannelPromise promise) {
+        ChannelHandlerContext ctx = ctx();
+        EventExecutor executor = ctx.executor();
+        if (executor.inEventLoop()) {
+            return finishEncode(ctx, promise);
+        } else {
+            final ChannelPromise p = ctx.newPromise();
+            executor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    ChannelFuture f = finishEncode(ctx(), p);
+                    f.addListener(new ChannelPromiseNotifier(promise));
+                }
+            });
+            return p;
+        }
     }
 
     private ChannelHandlerContext ctx() {
@@ -174,38 +184,67 @@ public class JdkZlibEncoder extends ZlibEncoder {
 
     @Override
     public boolean isClosed() {
-        return finished.get();
+        return finished;
     }
 
     @Override
-    protected void encode(ChannelHandlerContext ctx, ByteBuf in, ByteBuf out) throws Exception {
-        if (finished.get()) {
-            out.writeBytes(in);
+    protected void encode(ChannelHandlerContext ctx, ByteBuf uncompressed, ByteBuf out) throws Exception {
+        if (finished) {
+            out.writeBytes(uncompressed);
             return;
         }
 
-        ByteBuf uncompressed = in;
-        byte[] inAry = new byte[uncompressed.readableBytes()];
-        uncompressed.readBytes(inAry);
+        int len = uncompressed.readableBytes();
+        if (len == 0) {
+            return;
+        }
 
-        int sizeEstimate = (int) Math.ceil(inAry.length * 1.001) + 12;
-        out.ensureWritable(sizeEstimate);
+        int offset;
+        byte[] inAry;
+        if (uncompressed.hasArray()) {
+            // if it is backed by an array we not need to to do a copy at all
+            inAry = uncompressed.array();
+            offset = uncompressed.arrayOffset() + uncompressed.readerIndex();
+            // skip all bytes as we will consume all of them
+            uncompressed.skipBytes(len);
+        } else {
+            inAry = new byte[len];
+            uncompressed.readBytes(inAry);
+            offset = 0;
+        }
 
-        synchronized (deflater) {
-            if (gzip) {
-                crc.update(inAry);
-                if (writeHeader) {
-                    out.writeBytes(gzipHeader);
-                    writeHeader = false;
-                }
-            }
-
-            deflater.setInput(inAry);
-            while (!deflater.needsInput()) {
-                int numBytes = deflater.deflate(encodeBuf, 0, encodeBuf.length, Deflater.SYNC_FLUSH);
-                out.writeBytes(encodeBuf, 0, numBytes);
+        if (writeHeader) {
+            writeHeader = false;
+            if (wrapper == ZlibWrapper.GZIP) {
+                out.writeBytes(gzipHeader);
             }
         }
+
+        if (wrapper == ZlibWrapper.GZIP) {
+            crc.update(inAry, offset, len);
+        }
+
+        deflater.setInput(inAry, offset, len);
+        while (!deflater.needsInput()) {
+            deflate(out);
+        }
+    }
+
+    @Override
+    protected final ByteBuf allocateBuffer(ChannelHandlerContext ctx, ByteBuf msg,
+                                           boolean preferDirect) throws Exception {
+        int sizeEstimate = (int) Math.ceil(msg.readableBytes() * 1.001) + 12;
+        if (writeHeader) {
+            switch (wrapper) {
+                case GZIP:
+                    sizeEstimate += gzipHeader.length;
+                    break;
+                case ZLIB:
+                    sizeEstimate += 2; // first two magic bytes
+                    break;
+            }
+        }
+        return ctx.alloc().heapBuffer(sizeEstimate);
     }
 
     @Override
@@ -230,41 +269,57 @@ public class JdkZlibEncoder extends ZlibEncoder {
     }
 
     private ChannelFuture finishEncode(final ChannelHandlerContext ctx, ChannelPromise promise) {
-        if (!finished.compareAndSet(false, true)) {
+        if (finished) {
             promise.setSuccess();
             return promise;
         }
 
-        ByteBuf footer = Unpooled.buffer();
-        synchronized (deflater) {
-            deflater.finish();
-            while (!deflater.finished()) {
-                int numBytes = deflater.deflate(encodeBuf, 0, encodeBuf.length);
-                footer.writeBytes(encodeBuf, 0, numBytes);
-            }
-            if (gzip) {
-                int crcValue = (int) crc.getValue();
-                int uncBytes = deflater.getTotalIn();
-                footer.writeByte(crcValue);
-                footer.writeByte(crcValue >>> 8);
-                footer.writeByte(crcValue >>> 16);
-                footer.writeByte(crcValue >>> 24);
-                footer.writeByte(uncBytes);
-                footer.writeByte(uncBytes >>> 8);
-                footer.writeByte(uncBytes >>> 16);
-                footer.writeByte(uncBytes >>> 24);
-            }
-            deflater.end();
+        finished = true;
+        ByteBuf footer = ctx.alloc().heapBuffer();
+        if (writeHeader && wrapper == ZlibWrapper.GZIP) {
+            // Write the GZIP header first if not written yet. (i.e. user wrote nothing.)
+            writeHeader = false;
+            footer.writeBytes(gzipHeader);
         }
 
-        ctx.nextOutboundByteBuffer().writeBytes(footer);
-        ctx.flush(promise);
+        deflater.finish();
 
-        return promise;
+        while (!deflater.finished()) {
+            deflate(footer);
+            if (!footer.isWritable()) {
+                // no more space so write it to the channel and continue
+                ctx.write(footer);
+                footer = ctx.alloc().heapBuffer();
+            }
+        }
+        if (wrapper == ZlibWrapper.GZIP) {
+            int crcValue = (int) crc.getValue();
+            int uncBytes = deflater.getTotalIn();
+            footer.writeByte(crcValue);
+            footer.writeByte(crcValue >>> 8);
+            footer.writeByte(crcValue >>> 16);
+            footer.writeByte(crcValue >>> 24);
+            footer.writeByte(uncBytes);
+            footer.writeByte(uncBytes >>> 8);
+            footer.writeByte(uncBytes >>> 16);
+            footer.writeByte(uncBytes >>> 24);
+        }
+        deflater.end();
+        return ctx.writeAndFlush(footer, promise);
+    }
+
+    private void deflate(ByteBuf out) {
+        int numBytes;
+        do {
+            int writerIndex = out.writerIndex();
+            numBytes = deflater.deflate(
+                    out.array(), out.arrayOffset() + writerIndex, out.writableBytes(), Deflater.SYNC_FLUSH);
+            out.writerIndex(writerIndex + numBytes);
+        } while (numBytes > 0);
     }
 
     @Override
-    public void beforeAdd(ChannelHandlerContext ctx) throws Exception {
+    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
         this.ctx = ctx;
     }
 }

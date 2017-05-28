@@ -18,25 +18,22 @@ package io.netty.test.udt.util;
 
 import com.yammer.metrics.core.Meter;
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.MessageBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundMessageHandlerAdapter;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.udt.UdtMessage;
 import io.netty.channel.udt.nio.NioUdtProvider;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
 /**
  * Handler implementation for the echo peer. It initiates the ping-pong traffic
  * between the echo peers by sending the first message to the other peer on
  * activation.
  */
-public class EchoMessageHandler extends
-        ChannelInboundMessageHandlerAdapter<UdtMessage> {
+public class EchoMessageHandler extends ChannelInboundHandlerAdapter {
 
-    private static final Logger log = LoggerFactory
-            .getLogger(EchoMessageHandler.class.getName());
+    private static final InternalLogger log = InternalLoggerFactory.getInstance(EchoMessageHandler.class);
 
     private final Meter meter;
     private final UdtMessage message;
@@ -46,9 +43,6 @@ public class EchoMessageHandler extends
     }
 
     public EchoMessageHandler(final Meter meter, final int messageSize) {
-
-        super(UdtMessage.class);
-
         this.meter = meter;
 
         final ByteBuf byteBuf = Unpooled.buffer(messageSize);
@@ -58,49 +52,26 @@ public class EchoMessageHandler extends
         }
 
         message = new UdtMessage(byteBuf);
-
     }
 
     @Override
     public void channelActive(final ChannelHandlerContext ctx) throws Exception {
-
-        log.info("ECHO active {}", NioUdtProvider.socketUDT(ctx.channel())
-                .toStringOptions());
-
-        final MessageBuf<Object> out = ctx.nextOutboundMessageBuffer();
-
-        out.add(message);
-
-        ctx.flush();
-
+        log.info("ECHO active {}", NioUdtProvider.socketUDT(ctx.channel()).toStringOptions());
+        ctx.writeAndFlush(message);
     }
 
     @Override
-    public void exceptionCaught(final ChannelHandlerContext ctx,
-            final Throwable e) {
-
-        log.error("exception : {}", e.getMessage());
-
+    public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable e) {
+        log.error("exception", e);
         ctx.close();
-
     }
 
     @Override
-    protected void messageReceived(final ChannelHandlerContext ctx,
-            final UdtMessage message) throws Exception {
-
-        final ByteBuf byteBuf = message.data();
-
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        UdtMessage udtMsg = (UdtMessage) msg;
         if (meter != null) {
-            meter.mark(byteBuf.readableBytes());
+            meter.mark(udtMsg.content().readableBytes());
         }
-
-        final MessageBuf<Object> out = ctx.nextOutboundMessageBuffer();
-
-        out.add(message);
-
-        ctx.flush();
-
+        ctx.writeAndFlush(msg);
     }
-
 }

@@ -23,12 +23,27 @@ import java.nio.charset.Charset;
  * Interface to enable creation of InterfaceHttpData objects
  */
 public interface HttpDataFactory {
+
     /**
-    *
-    * @param request associated request
-    * @return a new Attribute with no value
-    */
+     * To set a max size limitation on fields. Exceeding it will generate an ErrorDataDecoderException.
+     * A value of -1 means no limitation (default).
+     */
+    void setMaxLimit(long max);
+
+    /**
+     *
+     * @param request associated request
+     * @return a new Attribute with no value
+     */
     Attribute createAttribute(HttpRequest request, String name);
+
+    /**
+     * @param request associated request
+     * @param name name of the attribute
+     * @param definedSize defined size from request for this attribute
+     * @return a new Attribute with no value
+     */
+    Attribute createAttribute(HttpRequest request, String name, long definedSize);
 
     /**
      * @param request associated request
@@ -57,10 +72,22 @@ public interface HttpDataFactory {
      *
      * @param request associated request
      */
-    void cleanRequestHttpDatas(HttpRequest request);
+    void cleanRequestHttpData(HttpRequest request);
 
     /**
      * Remove all InterfaceHttpData from virtual File storage from clean list for all requests
      */
+    void cleanAllHttpData();
+
+    /**
+     * @deprecated Use {@link #cleanRequestHttpData(HttpRequest)} instead.
+     */
+    @Deprecated
+    void cleanRequestHttpDatas(HttpRequest request);
+
+    /**
+     * @deprecated Use {@link #cleanAllHttpData()} instead.
+     */
+    @Deprecated
     void cleanAllHttpDatas();
 }
